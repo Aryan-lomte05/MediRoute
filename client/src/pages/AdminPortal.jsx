@@ -7,6 +7,7 @@ import { getSocket } from '../lib/socket'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+import { ADMIN_REAL_ROUTE } from '../lib/routing'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
@@ -124,7 +125,44 @@ export default function AdminPortal() {
         },
       })
 
-      // 2. Add Live Glowing Green Corridor GeoJSON Line
+      // Real-Time Road Traffic Layer (Mapbox Vector Traffic)
+      try {
+        if (!map.getSource('mapbox-traffic')) {
+          map.addSource('mapbox-traffic', {
+            type: 'vector',
+            url: 'mapbox://mapbox.mapbox-traffic-v1',
+          })
+          map.addLayer({
+            id: 'traffic-roads',
+            type: 'line',
+            source: 'mapbox-traffic',
+            'source-layer': 'traffic',
+            paint: {
+              'line-color': [
+                'case',
+                ['==', ['get', 'congestion'], 'low'], '#10b981',
+                ['==', ['get', 'congestion'], 'moderate'], '#f59e0b',
+                ['==', ['get', 'congestion'], 'heavy'], '#ef4444',
+                ['==', ['get', 'congestion'], 'severe'], '#991b1b',
+                '#38bdf8',
+              ],
+              'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 14, 2.5, 17, 5],
+              'line-opacity': 0.65,
+            },
+          })
+        }
+      } catch (e) {
+        console.warn('Traffic layer init warning:', e)
+      }
+
+      // 2. Add Live Glowing Green Corridor GeoJSON Line (100% Real-Road Snapped)
+      const adminCoords = ADMIN_REAL_ROUTE?.coordinates || [
+        [72.831, 19.002],
+        [72.842, 19.018],
+        [72.852, 19.035],
+        [72.863, 19.048],
+      ]
+
       map.addSource('green-corridor-route', {
         type: 'geojson',
         data: {
@@ -132,12 +170,7 @@ export default function AdminPortal() {
           properties: {},
           geometry: {
             type: 'LineString',
-            coordinates: [
-              [72.831, 19.002], // Lower Parel (#INC-7842)
-              [72.842, 19.018], // Dadar junction
-              [72.852, 19.035], // EMS-104 Ambulance position
-              [72.863, 19.048], // Sion Hospital
-            ],
+            coordinates: adminCoords,
           },
         },
       })

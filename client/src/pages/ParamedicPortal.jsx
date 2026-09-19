@@ -6,6 +6,7 @@ import { getSocket } from '../lib/socket'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+import { PARAMEDIC_REAL_ROUTE } from '../lib/routing'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
@@ -111,7 +112,43 @@ export default function ParamedicPortal() {
         },
       })
 
-      // Active Green Corridor Priority Route
+      // Real-Time Road Traffic Layer
+      try {
+        if (!map.getSource('mapbox-traffic')) {
+          map.addSource('mapbox-traffic', {
+            type: 'vector',
+            url: 'mapbox://mapbox.mapbox-traffic-v1',
+          })
+          map.addLayer({
+            id: 'traffic-roads',
+            type: 'line',
+            source: 'mapbox-traffic',
+            'source-layer': 'traffic',
+            paint: {
+              'line-color': [
+                'case',
+                ['==', ['get', 'congestion'], 'low'], '#10b981',
+                ['==', ['get', 'congestion'], 'moderate'], '#f59e0b',
+                ['==', ['get', 'congestion'], 'heavy'], '#ef4444',
+                ['==', ['get', 'congestion'], 'severe'], '#991b1b',
+                '#38bdf8',
+              ],
+              'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 14, 2.5, 17, 5],
+              'line-opacity': 0.65,
+            },
+          })
+        }
+      } catch (e) {
+        console.warn('Traffic layer init warning:', e)
+      }
+
+      // Active Green Corridor Priority Route (100% Real-Road Snapped)
+      const paramedicCoords = PARAMEDIC_REAL_ROUTE?.coordinates || [
+        [72.843, 19.025],
+        [72.836, 19.040],
+        [72.8282, 19.0515],
+      ]
+
       map.addSource('paramedic-corridor', {
         type: 'geojson',
         data: {
@@ -119,12 +156,7 @@ export default function ParamedicPortal() {
           properties: {},
           geometry: {
             type: 'LineString',
-            coordinates: [
-              [72.848, 19.022], // Start / Accident origin (Dadar / WEH)
-              [72.842, 19.034], // Ambulance current position
-              [72.835, 19.046], // Highway junction
-              [72.828, 19.052], // Lilavati Trauma Center (Bandra West)
-            ],
+            coordinates: paramedicCoords,
           },
         },
       })
