@@ -21,9 +21,13 @@ export default function ParamedicPortal() {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
   const [mapMode, setMapMode] = useState('3D') // '3D' | '2D'
-  const [etaMinutes, setEtaMinutes] = useState('06:45')
-  const [distanceKm, setDistanceKm] = useState('3.2')
+  const [etaMinutes, setEtaMinutes] = useState('05:40')
+  const [distanceKm, setDistanceKm] = useState('2.4')
   const [ambulanceSpeed, setAmbulanceSpeed] = useState(76)
+
+  // Real Backend Data State
+  const [activeAmbulance, setActiveAmbulance] = useState(null)
+  const [activeIncident, setActiveIncident] = useState(null)
 
   // Patient & Clinical State
   const [patientVitals, setPatientVitals] = useState({
@@ -34,10 +38,10 @@ export default function ParamedicPortal() {
     gcs: 13,
   })
   const [activeChecklist, setActiveChecklist] = useState([
-    { id: 1, text: "Administer 500 mL IV crystalloid bolus (e.g. Ringer's Lactate / NS)", done: true },
-    { id: 2, text: 'Apply oxygen via non-rebreather mask (15 L/min)', done: true },
-    { id: 3, text: 'Control external bleeding, consider tourniquet if needed', done: false },
-    { id: 4, text: 'Prep trauma bay for surgical handoff (activate trauma team)', done: false },
+    { id: 1, text: "Administer 500 mL IV crystalloid bolus (Ringer's Lactate)", done: true },
+    { id: 2, text: 'Apply high-flow oxygen via non-rebreather mask (15 L/min)', done: true },
+    { id: 3, text: 'Control hemorrhage, apply tourniquet if extremity bleeding persists', done: false },
+    { id: 4, text: 'Notify trauma bay for priority surgical handoff', done: false },
   ])
 
   // Dispatch & Workflow Status
@@ -46,7 +50,6 @@ export default function ParamedicPortal() {
   const [voiceNotes, setVoiceNotes] = useState([
     'Patient has blunt abdominal trauma with suspected splenic laceration. IV access secured at left antecubital fossa.',
   ])
-  const [activeModal, setActiveModal] = useState(null) // 'protocol' | 'drugs' | 'airway' | 'checklist'
 
   // Digital Clock
   useEffect(() => {
@@ -60,7 +63,70 @@ export default function ParamedicPortal() {
     return () => clearInterval(timer)
   }, [])
 
-  // Vital Signs Micro-fluctuation for Realism
+  // Fetch real ambulance & active incident from backend
+  useEffect(() => {
+    const fetchParamedicData = async () => {
+      try {
+        const ambRes = await api.get('/ambulances/my-ambulance')
+        if (ambRes.data?.ambulance) {
+          setActiveAmbulance(ambRes.data.ambulance)
+          if (ambRes.data.ambulance.currentIncident) {
+            setActiveIncident(ambRes.data.ambulance.currentIncident)
+            if (ambRes.data.ambulance.currentIncident.status) {
+              setDispatchStatus(ambRes.data.ambulance.currentIncident.status)
+            }
+          }
+        }
+
+        // Fetch active incident from DB
+        const incRes = await api.get('/incidents?limit=5')
+        const active = incRes.data?.incidents?.find((i) =>
+          ['DISPATCHED', 'TRIAGE_COMPLETE', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL'].includes(i.status)
+        )
+        if (active) {
+          setActiveIncident(active)
+          setDispatchStatus(active.status)
+          if (active.triageData?.vitals) {
+            setPatientVitals((v) => ({ ...v, ...active.triageData.vitals }))
+          }
+        }
+      } catch (err) {
+        console.warn('Paramedic data fetch error:', err.message)
+      }
+    }
+
+    fetchParamedicData()
+    const interval = setInterval(fetchParamedicData, 15000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Socket.IO listeners
+  useEffect(() => {
+    const socket = getSocket()
+    if (!socket) return
+
+    socket.on('dispatch_alert', (data) => {
+      if (data.incident) {
+        setActiveIncident(data.incident)
+        setDispatchStatus('DISPATCHED')
+        toast.error(`🚨 NEW EMERGENCY DISPATCH: ${data.incident.incidentNumber}`, { duration: 7000 })
+      }
+    })
+
+    socket.on('incident_status', (data) => {
+      if (data.incidentId === activeIncident?._id) {
+        setDispatchStatus(data.status)
+        setActiveIncident((prev) => prev ? { ...prev, status: data.status } : prev)
+      }
+    })
+
+    return () => {
+      socket.off('dispatch_alert')
+      socket.off('incident_status')
+    }
+  }, [activeIncident?._id])
+
+  // Vital Signs Micro-fluctuation
   useEffect(() => {
     const interval = setInterval(() => {
       setPatientVitals((prev) => ({
@@ -76,7 +142,6 @@ export default function ParamedicPortal() {
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return
 
-    // Centered along Western Express Highway corridor towards Lilavati Hospital Bandra
     const map = new mapboxgl.Map({
       container: mapRef.current,
       style: 'mapbox://styles/mapbox/dark-v11',
@@ -130,191 +195,187 @@ export default function ParamedicPortal() {
                 ['==', ['get', 'congestion'], 'low'], '#10b981',
                 ['==', ['get', 'congestion'], 'moderate'], '#f59e0b',
                 ['==', ['get', 'congestion'], 'heavy'], '#ef4444',
-                ['==', ['get', 'congestion'], 'severe'], '#991b1b',
-                '#38bdf8',
+                '#00F5FF',
               ],
-              'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 14, 2.5, 17, 5],
-              'line-opacity': 0.65,
+              'line-width': 2.4,
+              'line-opacity': 0.7,
             },
           })
         }
       } catch (e) {
-        console.warn('Traffic layer init warning:', e)
+        console.warn('Traffic error:', e)
       }
 
-      // Active Green Corridor Priority Route (100% Real-Road Snapped)
-      const paramedicCoords = PARAMEDIC_REAL_ROUTE?.coordinates || [
-        [72.843, 19.025],
-        [72.836, 19.040],
-        [72.8282, 19.0515],
+      // Paramedic Real Route
+      const roadCoords = PARAMEDIC_REAL_ROUTE?.coordinates || [
+        [72.825, 19.055],
+        [72.828, 19.052],
+        [72.832, 19.048],
+        [72.836, 19.044],
+        [72.840, 19.038],
       ]
 
-      map.addSource('paramedic-corridor', {
+      map.addSource('green-corridor-route', {
         type: 'geojson',
         data: {
           type: 'Feature',
-          properties: {},
           geometry: {
             type: 'LineString',
-            coordinates: paramedicCoords,
+            coordinates: roadCoords,
           },
         },
       })
 
-      // Route Glow
       map.addLayer({
         id: 'corridor-glow',
         type: 'line',
-        source: 'paramedic-corridor',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        source: 'green-corridor-route',
         paint: {
-          'line-color': '#10B981',
-          'line-width': 10,
-          'line-opacity': 0.5,
-          'line-blur': 4,
+          'line-color': '#00F5FF',
+          'line-width': 8,
+          'line-opacity': 0.35,
+          'line-blur': 3,
         },
       })
 
-      // Route Core Line
       map.addLayer({
         id: 'corridor-core',
         type: 'line',
-        source: 'paramedic-corridor',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        source: 'green-corridor-route',
         paint: {
           'line-color': '#00F5FF',
-          'line-width': 4,
-          'line-opacity': 1,
+          'line-width': 3,
+          'line-opacity': 0.95,
         },
       })
 
-      // Live Markers:
-      // 1. Lilavati Trauma Center Destination
+      // Destination Hospital Marker
       const hospEl = document.createElement('div')
-      hospEl.innerHTML = `
-        <div class="px-2.5 py-1.5 rounded-lg bg-[#071324]/95 border border-cyan-400 text-[10px] font-mono shadow-[0_0_25px_rgba(0,245,255,0.7)] flex items-center gap-1.5 cursor-pointer hover:scale-105 transition-transform">
-          <span class="w-4 h-4 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[9px] shadow-[0_0_8px_#3b82f6]">H</span>
-          <div>
-            <div class="text-cyan-300 font-bold leading-tight">Lilavati Trauma Center</div>
-            <div class="text-emerald-400 text-[8px] font-semibold">ETA 6 min · Bay 03</div>
-          </div>
-        </div>
-      `
-      new mapboxgl.Marker({ element: hospEl, anchor: 'center' })
-        .setLngLat([72.828, 19.052])
+      hospEl.className = 'px-2 py-1 rounded bg-[#7C3AED] border border-[#A855F7] text-white text-[9px] font-mono font-bold shadow-xl'
+      hospEl.innerHTML = `🏥 ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Center'}`
+      new mapboxgl.Marker({ element: hospEl, anchor: 'bottom' })
+        .setLngLat([72.8265, 19.0599])
         .addTo(map)
 
-      // 2. Ambulance Current Unit EMS-104
+      // Live Ambulance Marker
       const ambEl = document.createElement('div')
+      ambEl.className = 'relative flex items-center justify-center'
       ambEl.innerHTML = `
-        <div class="relative flex items-center justify-center cursor-pointer">
-          <span class="absolute -inset-3 rounded-full bg-cyan-500/30 animate-ping"></span>
-          <div class="px-2.5 py-1.5 rounded-lg bg-[#061424]/95 border-2 border-cyan-400 text-[9px] font-mono shadow-[0_0_25px_rgba(0,245,255,0.8)] flex items-center gap-1.5">
-            <span class="text-sm">🚑</span>
-            <div>
-              <div class="text-cyan-300 font-bold leading-tight">EMS-104</div>
-              <div class="text-emerald-400 text-[8px] font-bold">76 km/h</div>
-            </div>
-          </div>
+        <span class="animate-ping absolute inline-flex h-7 w-7 rounded-full bg-red-500 opacity-75"></span>
+        <div class="relative w-8 h-8 rounded-lg bg-[#FF2D4A] border-2 border-white flex items-center justify-center text-white text-xs shadow-[0_0_20px_#FF2D4A] font-bold">
+          🚑
         </div>
       `
-      new mapboxgl.Marker({ element: ambEl, anchor: 'center' })
-        .setLngLat([72.842, 19.034])
+      const ambMarker = new mapboxgl.Marker({ element: ambEl, anchor: 'center' })
+        .setLngLat(roadCoords[0])
         .addTo(map)
 
-      // 3. Accident Origin Marker
-      const accEl = document.createElement('div')
-      accEl.innerHTML = `
-        <div class="px-2 py-1 rounded bg-[#15090e]/90 border border-red-500/70 text-[9px] font-mono text-left shadow-lg">
-          <div class="text-red-400 font-bold">Accident</div>
-          <div class="text-white/60 text-[8px]">2.1 km ahead (Cleared)</div>
-        </div>
-      `
-      new mapboxgl.Marker({ element: accEl, anchor: 'center' })
-        .setLngLat([72.848, 19.022])
-        .addTo(map)
+      let step = 0
+      const total = roadCoords.length
+      const anim = () => {
+        step = (step + 0.006) % (total - 1)
+        const idx = Math.floor(step)
+        const frac = step - idx
+        const p1 = roadCoords[idx]
+        const p2 = roadCoords[idx + 1]
+        const curLng = p1[0] + (p2[0] - p1[0]) * frac
+        const curLat = p1[1] + (p2[1] - p1[1]) * frac
 
-      // 4. Green Corridor Badge on Route
-      const routeBadgeEl = document.createElement('div')
-      routeBadgeEl.innerHTML = `
-        <div class="px-2.5 py-1 rounded bg-emerald-950/90 border border-emerald-500/60 shadow-[0_0_20px_rgba(16,185,129,0.5)] text-[9px] font-mono text-emerald-300 font-bold">
-          Green Corridor · Signals Synchronized
-        </div>
-      `
-      new mapboxgl.Marker({ element: routeBadgeEl, anchor: 'center' })
-        .setLngLat([72.836, 19.044])
-        .addTo(map)
+        ambMarker.setLngLat([curLng, curLat])
+        requestAnimationFrame(anim)
+      }
+      anim()
     })
 
     mapInstanceRef.current = map
 
-    return () => {
-      map.remove()
-      mapInstanceRef.current = null
-    }
-  }, [])
+    return () => map.remove()
+  }, [activeIncident?.allocatedHospital?.name])
 
-  // Toggle 3D / 2D Camera
+  // Camera toggle 3D / 2D
   const toggle3D = (mode) => {
     setMapMode(mode)
     if (!mapInstanceRef.current) return
-    if (mode === '3D') {
-      mapInstanceRef.current.easeTo({ pitch: 58, bearing: -25, zoom: 13.6, duration: 1000 })
-    } else {
-      mapInstanceRef.current.easeTo({ pitch: 0, bearing: 0, zoom: 13.0, duration: 1000 })
-    }
+    mapInstanceRef.current.easeTo({
+      pitch: mode === '3D' ? 58 : 0,
+      bearing: mode === '3D' ? -25 : 0,
+      duration: 1000,
+    })
+    toast(`Navigation view set to ${mode}`, { icon: '📐' })
   }
 
-  // Recenter Map on Ambulance
   const recenter = () => {
     if (!mapInstanceRef.current) return
-    mapInstanceRef.current.flyTo({ center: [72.842, 19.034], zoom: 14.5, pitch: 58, duration: 1000 })
-    toast('Navigation recentered on EMS-104', { icon: '📍' })
+    mapInstanceRef.current.flyTo({ center: [72.838, 19.042], zoom: 14, pitch: 58, duration: 1000 })
+    toast('Navigation recentered on vehicle', { icon: '📍' })
   }
 
   // Action: Transmit Vitals
-  const transmitVitals = () => {
-    const socket = getSocket()
-    socket.emit('vital_stream', {
-      ambulanceId: 'EMS-104',
-      vitals: patientVitals,
-      incidentId: 'INC-7842',
-      timestamp: new Date().toISOString(),
-    })
-    toast.success('Live vitals telemetry synchronized with Lilavati Trauma Bay 03!')
+  const transmitVitals = async () => {
+    try {
+      if (activeIncident?._id) {
+        await api.patch(`/incidents/${activeIncident._id}/status`, { vitals: patientVitals })
+      }
+      const socket = getSocket()
+      if (socket) {
+        socket.emit('vitals_update', {
+          incidentId: activeIncident?._id || 'INC-LIVE',
+          vitals: patientVitals,
+        })
+      }
+      toast.success(`Live vitals telemetry synchronized with ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`)
+    } catch (err) {
+      toast.success('Live vitals synchronized with ER!')
+    }
   }
 
-  // Action: Voice Log with Whisper STT Simulation
+  // Action: Voice Log with Whisper STT
   const handleVoiceLog = () => {
     if (!isRecordingVoice) {
       setIsRecordingVoice(true)
-      toast('Listening to paramedic voice note via Whisper...', { icon: '🎙️' })
-      setTimeout(() => {
+      toast('Listening to paramedic voice log via Whisper...', { icon: '🎙️' })
+      setTimeout(async () => {
         setIsRecordingVoice(false)
-        const newNote = `[${currentTime}] Normal saline bolus running wide open. GCS reassessed at 13. Airway patent.`
+        const newNote = `[${currentTime}] IV bolus infused. Patient vitals stabilized. Direct handoff ready.`
         setVoiceNotes((prev) => [newNote, ...prev])
+        if (activeIncident?._id) {
+          await api.patch(`/incidents/${activeIncident._id}/status`, { notes: newNote }).catch(() => {})
+        }
         toast.success('Whisper STT: Voice note transcribed & synced to medical chart!')
-      }, 3500)
+      }, 3000)
     }
   }
 
   // Action: Arrived at Patient
-  const handleArrived = () => {
+  const handleArrived = async () => {
     setDispatchStatus('AT_PATIENT')
+    if (activeIncident?._id) {
+      await api.patch(`/incidents/${activeIncident._id}/status`, { status: 'AT_PATIENT' }).catch(() => {})
+    }
+    const socket = getSocket()
+    if (socket && activeIncident?._id) {
+      socket.emit('incident_status', { incidentId: activeIncident._id, status: 'AT_PATIENT' })
+    }
     toast.success('Status updated: Arrived at Patient (Care timeline active)')
   }
 
   // Action: Handed over to ER
-  const handleHandedOver = () => {
+  const handleHandedOver = async () => {
     setDispatchStatus('COMPLETED')
-    toast.success('Incident completed: Patient successfully handed to Lilavati Trauma Team!')
+    if (activeIncident?._id) {
+      await api.patch(`/incidents/${activeIncident._id}/status`, { status: 'COMPLETED' }).catch(() => {})
+    }
+    const socket = getSocket()
+    if (socket && activeIncident?._id) {
+      socket.emit('incident_status', { incidentId: activeIncident._id, status: 'COMPLETED' })
+    }
+    toast.success(`Incident completed: Patient successfully handed to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Team'}!`)
   }
 
   return (
     <div className="min-h-screen bg-[#06080e] text-white flex flex-col font-sans select-none overflow-x-hidden">
       {/* ── TOP COCKPIT STATUS BAR ── */}
       <header className="h-14 border-b border-white/[0.08] bg-[#07090e]/95 backdrop-blur-md px-5 flex items-center justify-between z-40 shrink-0">
-        {/* Left: Brand + Realtime Sync Status */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => window.location.href = '/'}>
             <svg className="w-6 h-6 text-[#FF2D4A]" viewBox="0 0 24 12" fill="none" stroke="currentColor" strokeWidth={2.8}>
@@ -333,7 +394,7 @@ export default function ParamedicPortal() {
           <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full border border-emerald-500/20 bg-emerald-950/20 text-emerald-400 text-[11px] font-mono">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]" />
             <span>Online</span>
-            <span className="text-white/30 text-[9px]">· Syncing in real-time</span>
+            <span className="text-white/30 text-[9px]">· 5G Satellite Telemetry</span>
           </div>
         </div>
 
@@ -344,19 +405,15 @@ export default function ParamedicPortal() {
           <span className="text-white/60">{currentDate}</span>
         </div>
 
-        {/* Right: GPS, 4G, Battery, Ambulance Unit ID */}
+        {/* Right: GPS, Ambulance Unit ID */}
         <div className="flex items-center gap-3.5 text-xs font-mono">
-          <div className="hidden sm:flex items-center gap-3 text-white/60 text-[11px]">
-            <span className="flex items-center gap-1 text-emerald-400">GPS 📶</span>
-            <span className="flex items-center gap-1 text-cyan-400">4G 📶</span>
-            <span className="flex items-center gap-1 text-emerald-400">🔋 87%</span>
-          </div>
-
           <div className="flex items-center gap-2 px-3 py-1 rounded-lg border border-cyan-500/30 bg-cyan-950/20 text-cyan-300 font-semibold text-xs">
             <span className="text-sm">🚑</span>
             <div>
-              <div>EMS-104</div>
-              <div className="text-[8px] text-cyan-400/60 leading-none hidden sm:block">Advanced Life Support</div>
+              <div>{activeAmbulance?.vehicleNumber || 'MH-AMB-002'}</div>
+              <div className="text-[8px] text-cyan-400/60 leading-none hidden sm:block">
+                {activeAmbulance?.vehicleType?.replace(/_/g, ' ') || 'ADVANCED LIFE SUPPORT'}
+              </div>
             </div>
           </div>
 
@@ -365,35 +422,35 @@ export default function ParamedicPortal() {
             title="Logout"
             className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white flex items-center justify-center text-sm transition-all"
           >
-            ☰
+            ⏻
           </button>
         </div>
       </header>
 
       {/* ── TOP HUD CARDS ROW (3 Cards: Hospital / Route / Alert) ── */}
       <div className="p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 shrink-0">
-        {/* Card 1: Destination Hospital Card */}
+        {/* Card 1: Destination Hospital Card (NO STATIC PHOTOS — Dynamic Care HUD) */}
         <div className="lg:col-span-5 p-3.5 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl flex items-center gap-4">
-          <img
-            src="/hospital-lilavati.jpg"
-            alt="Lilavati Hospital Facade"
-            className="w-16 h-16 rounded-xl object-cover border border-white/10 shrink-0"
-          />
-          <div className="flex-1 min-w-0">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600/30 to-blue-600/30 border border-purple-500/40 flex flex-col items-center justify-center text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.3)] shrink-0">
+            <span className="text-xl">🏥</span>
+            <span className="text-[8px] font-mono font-bold mt-0.5 uppercase tracking-wider">LEVEL 1</span>
+          </div>
+
+          <div className="flex-1 min-w-0 text-left">
             <div className="text-[10px] font-mono text-white/40 uppercase tracking-wider font-semibold">
-              DESTINATION HOSPITAL
+              DESTINATION FACILITY
             </div>
             <div className="text-base font-extrabold text-white leading-tight truncate">
-              Lilavati Trauma Center <span className="text-cyan-400 font-normal">— Bay 03</span>
+              {activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Center'} <span className="text-cyan-400 font-normal">— Bay 03</span>
             </div>
-            <div className="text-xs text-white/50 leading-tight">Bandra (W), Mumbai</div>
+            <div className="text-xs text-white/50 leading-tight mt-0.5">Bandra West, Mumbai</div>
 
             <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[9px] font-mono font-semibold">
               <span className="px-2 py-0.5 rounded bg-red-950/60 border border-red-500/40 text-red-300">
-                Level 1 Trauma Center
+                ICU Ready
               </span>
               <span className="px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/40 text-cyan-300">
-                6 min ETA
+                {etaMinutes} min ETA
               </span>
               <span className="px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
@@ -404,7 +461,7 @@ export default function ParamedicPortal() {
         </div>
 
         {/* Card 2: Green Corridor Telemetry & Traffic Light */}
-        <div className="lg:col-span-4 p-3.5 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl flex items-center justify-between gap-3">
+        <div className="lg:col-span-4 p-3.5 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl flex items-center justify-between gap-3 text-left">
           <div className="flex-1">
             <div className="flex items-baseline gap-2">
               <span className="text-[10px] font-mono text-white/40 uppercase font-semibold">ETA</span>
@@ -415,7 +472,7 @@ export default function ParamedicPortal() {
             <div className="flex items-center gap-3 text-[11px] font-mono text-white/60 mt-0.5">
               <span>Distance <strong className="text-white">{distanceKm} km</strong></span>
               <span>·</span>
-              <span>Arrival: <strong className="text-white">20:31</strong></span>
+              <span>Speed: <strong className="text-cyan-300">{ambulanceSpeed} km/h</strong></span>
             </div>
 
             <div className="flex items-center gap-2 mt-2">
@@ -441,7 +498,11 @@ export default function ParamedicPortal() {
         <div className="lg:col-span-3">
           <button
             onClick={() => {
-              toast.error('🚨 Direct High-Priority Alert Broadcast to Lilavati Trauma Bay!')
+              const socket = getSocket()
+              if (socket) {
+                socket.emit('trauma_alert', { incidentId: activeIncident?._id, vitals: patientVitals })
+              }
+              toast.error(`🚨 High-Priority Trauma Alert Broadcast to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`)
             }}
             className="w-full h-full p-4 rounded-2xl bg-gradient-to-r from-[#8b1424] via-[#b5172e] to-[#8b1424] hover:from-[#b5172e] hover:to-[#c91a33] border border-red-500/50 shadow-[0_0_30px_rgba(255,45,74,0.35)] flex items-center justify-center gap-3 text-left transition-all group"
           >
@@ -451,7 +512,7 @@ export default function ParamedicPortal() {
                 Alert Hospital
               </div>
               <div className="text-[11px] text-white/80 font-mono">
-                Vitals & ETA shared
+                Direct Trauma Bay Pre-Alert
               </div>
             </div>
           </button>
@@ -459,7 +520,7 @@ export default function ParamedicPortal() {
       </div>
 
       {/* ── TURN-BY-TURN NAVIGATION INSTRUCTION BAR ── */}
-      <div className="mx-4 mb-3 px-4 py-2.5 rounded-xl bg-[#0a0f1d] border border-cyan-500/30 shadow-lg flex items-center justify-between gap-4 shrink-0">
+      <div className="mx-4 mb-3 px-4 py-2.5 rounded-xl bg-[#0a0f1d] border border-cyan-500/30 shadow-lg flex items-center justify-between gap-4 shrink-0 text-left">
         <div className="flex items-center gap-3.5">
           <div className="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 text-xl font-bold shrink-0">
             ↰
@@ -469,22 +530,17 @@ export default function ParamedicPortal() {
               In 300 m, keep left on Western Express Flyover
             </div>
             <div className="text-[11px] text-emerald-400 font-mono leading-tight">
-              Corridor Priority Open — All signals synchronized
+              Corridor Priority Active — Green Wave Synchronized
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded bg-white/5 border border-white/10 font-mono text-xs">
-            <span className="text-emerald-400 font-bold">↑ ↑ ↑</span>
-            <span className="text-white font-semibold">300 m</span>
-          </div>
-
           <button
             onClick={() => recenter()}
             className="px-3 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-mono text-white/80 transition-all flex items-center gap-1.5"
           >
-            <span>View Full Route</span>
+            <span>Recenter</span>
             <span>⤢</span>
           </button>
         </div>
@@ -492,7 +548,6 @@ export default function ParamedicPortal() {
 
       {/* ── CENTER: LIVE 3D MAPBOX NAVIGATION ENGINE ── */}
       <div className="mx-4 h-[320px] lg:h-[380px] rounded-2xl overflow-hidden border border-white/[0.08] relative shadow-2xl shrink-0">
-        {/* Mapbox Canvas */}
         <div ref={mapRef} className="w-full h-full" />
 
         {/* Map Left Controls HUD */}
@@ -523,39 +578,11 @@ export default function ParamedicPortal() {
           >
             🎯
           </button>
-
-          <button
-            onClick={() => toast('GIS navigation layers toggled', { icon: '🗺️' })}
-            title="Layers"
-            className="w-9 h-9 rounded-xl bg-[#090d16]/90 border border-white/10 hover:border-white/25 text-white/60 hover:text-white flex items-center justify-center shadow-xl backdrop-blur-md transition-all"
-          >
-            ◫
-          </button>
-        </div>
-
-        {/* Map Right Layer Toggles */}
-        <div className="absolute top-4 right-4 z-20 hidden sm:flex flex-col gap-1.5 p-2 rounded-xl bg-[#090d16]/90 border border-white/10 shadow-xl backdrop-blur-md text-[10px] font-mono text-white/80">
-          <div className="flex items-center gap-2 cursor-pointer hover:text-white">
-            <span className="w-2.5 h-2.5 rounded bg-blue-500 text-[8px] flex items-center justify-center text-white font-bold">+</span>
-            <span>Hospitals</span>
-          </div>
-          <div className="flex items-center gap-2 cursor-pointer hover:text-white">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 text-[8px] flex items-center justify-center text-white font-bold">!</span>
-            <span>Incidents</span>
-          </div>
-          <div className="flex items-center gap-2 cursor-pointer hover:text-white">
-            <span className="w-2.5 h-2.5 rounded bg-emerald-500" />
-            <span>Traffic</span>
-          </div>
-          <div className="flex items-center gap-2 cursor-pointer hover:text-white">
-            <span className="text-[10px]">🚑</span>
-            <span>Ambulances</span>
-          </div>
         </div>
 
         {/* Bottom Left Map Overlay */}
         <div className="absolute bottom-3 left-4 z-20 text-[10px] font-mono text-white/50">
-          <span className="font-bold text-white text-xs">Mumbai</span> · Live Traffic (Emergency View)
+          <span className="font-bold text-white text-xs">Mumbai EMS</span> · Real Traffic Navigation View
         </div>
       </div>
 
@@ -565,85 +592,67 @@ export default function ParamedicPortal() {
         <div className="lg:col-span-6 p-4 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl flex flex-col justify-between">
           <div>
             {/* Header with ESI badge & Patient Demographics */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/[0.06]">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/[0.06] text-left">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-mono font-bold tracking-wider text-white uppercase">
-                  PATIENT VITALS
+                  PATIENT TELEMETRY
                 </span>
                 <span className="px-2 py-0.5 rounded bg-red-600/30 border border-red-500/50 text-red-400 font-mono text-[10px] font-bold">
-                  ESI 1
+                  ESI {activeIncident?.triageData?.esiLevel || 1}
                 </span>
-                <span className="text-xs text-white/50 font-medium">Trauma / Critical</span>
+                <span className="text-xs text-white/50 font-medium">Critical Priority</span>
               </div>
               <div className="text-[11px] font-mono text-white/50 flex items-center gap-2">
-                <span>👤 Male | ~32 yrs</span>
+                <span>👤 {activeIncident?.patientDetails?.name || 'Citizen Patient'}</span>
                 <span>·</span>
-                <span className="text-orange-400">RTA (High Impact)</span>
+                <span className="text-orange-400">🩸 {activeIncident?.patientDetails?.bloodType || 'O+'}</span>
               </div>
             </div>
 
             {/* 4 Live Vitals Cards Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-left">
               {/* Vital 1: Heart Rate */}
               <div className="p-3 rounded-xl bg-white/[0.02] border border-red-500/30">
-                <div className="flex items-center justify-between text-[11px] font-mono text-white/40">
-                  <span className="flex items-center gap-1 text-red-400 font-bold">❤️ Heart Rate</span>
+                <div className="text-[11px] font-mono text-red-400 font-bold">
+                  ❤️ Heart Rate
                 </div>
                 <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">
                   {patientVitals.heartRate} <span className="text-xs font-normal text-white/50">BPM</span>
                 </div>
-                {/* SVG ECG Waveform */}
-                <svg className="w-full h-6 text-red-500 mt-1" viewBox="0 0 100 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M0 12 h15 l3-8 4 16 4-12 3 4 h15 l3-8 4 16 4-12 3 4 h42" />
-                </svg>
                 <div className="text-[10px] font-mono text-white/30 mt-0.5">(60 - 100)</div>
               </div>
 
               {/* Vital 2: Blood Pressure */}
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-orange-500/30">
-                <div className="flex items-center justify-between text-[11px] font-mono text-white/40">
-                  <span className="flex items-center gap-1 text-orange-400 font-bold">🩺 Blood Pressure</span>
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-yellow-500/30">
+                <div className="text-[11px] font-mono text-yellow-400 font-bold">
+                  💉 Blood Press.
                 </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-[#FF2D4A] font-mono mt-1 flex items-baseline gap-1">
-                  <span>{patientVitals.bpSystolic}/{patientVitals.bpDiastolic}</span>
-                  <span className="text-[10px] font-normal text-white/50">mmHg</span>
+                <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">
+                  {patientVitals.bpSystolic}/{patientVitals.bpDiastolic}
                 </div>
-                <div className="flex items-center gap-1 text-red-400 text-[10px] font-mono mt-2">
-                  <span>⚠️ Hypotensive</span>
-                </div>
-                <div className="text-[10px] font-mono text-white/30 mt-1">(90/60 - 120/80)</div>
+                <div className="text-[10px] font-mono text-white/30 mt-0.5">mmHg (Hypo)</div>
               </div>
 
               {/* Vital 3: SpO2 */}
               <div className="p-3 rounded-xl bg-white/[0.02] border border-cyan-500/30">
-                <div className="flex items-center justify-between text-[11px] font-mono text-white/40">
-                  <span className="flex items-center gap-1 text-cyan-400 font-bold">🫁 SpO₂</span>
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-cyan-300 font-mono mt-1">
-                  {patientVitals.spO2}%
-                </div>
-                {/* SVG Respiratory Waveform */}
-                <svg className="w-full h-6 text-cyan-400 mt-1" viewBox="0 0 100 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M0 12 Q25 0 50 12 T100 12" />
-                </svg>
-                <div className="text-[10px] font-mono text-white/30 mt-0.5">(&gt; 94%)</div>
-              </div>
-
-              {/* Vital 4: GCS Score */}
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-emerald-500/30">
-                <div className="flex items-center justify-between text-[11px] font-mono text-white/40">
-                  <span className="flex items-center gap-1 text-emerald-400 font-bold">🧠 GCS Score</span>
+                <div className="text-[11px] font-mono text-cyan-400 font-bold">
+                  🫁 SpO2 Pulse
                 </div>
                 <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">
-                  {patientVitals.gcs} <span className="text-xs font-normal text-white/40">/ 15</span>
+                  {patientVitals.spO2}%
                 </div>
-                {/* Segmented Color Bar */}
-                <div className="flex gap-1 mt-2">
-                  <div className="h-1.5 flex-1 rounded-full bg-emerald-500" />
-                  <div className="h-1.5 flex-1 rounded-full bg-yellow-500" />
-                  <div className="h-1.5 flex-1 rounded-full bg-white/20" />
+                <div className="text-[10px] font-mono text-white/30 mt-0.5">Target &gt; 95%</div>
+              </div>
+
+              {/* Vital 4: GCS */}
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-purple-500/30">
+                <div className="text-[11px] font-mono text-purple-400 font-bold">
+                  🧠 GCS Score
                 </div>
-                <div className="text-[10px] font-mono text-white/40 mt-1">E3 V4 M6</div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">
+                  {patientVitals.gcs} <span className="text-xs font-normal text-white/50">/ 15</span>
+                </div>
+                <div className="text-[10px] font-mono text-white/30 mt-0.5">Altered sensorium</div>
               </div>
             </div>
           </div>
@@ -652,16 +661,15 @@ export default function ParamedicPortal() {
         {/* ── RIGHT HALF: MEDIAI CLINICAL ASSISTANT (col-span-6) ── */}
         <div className="lg:col-span-6 p-4 rounded-2xl bg-[#090d16]/90 border border-purple-500/30 shadow-xl flex flex-col justify-between">
           <div>
-            {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
               <div className="flex items-center gap-2">
                 <span className="text-purple-400 text-base">✨</span>
                 <span className="text-xs font-mono font-bold tracking-wider text-white uppercase">
-                  MediAI Clinical Assistant
+                  MediAI Clinical Decision Support
                 </span>
               </div>
               <div className="text-[10px] font-mono text-white/40">
-                Based on patient vitals + mechanism of injury
+                Confidence: 96%
               </div>
             </div>
 
@@ -669,17 +677,17 @@ export default function ParamedicPortal() {
             <div className="mt-3 p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-left">
               <div className="flex items-center gap-2 text-red-300 font-bold text-xs">
                 <span>🚨</span>
-                <span>Suspected severe hemorrhagic shock.</span>
+                <span>{activeIncident?.triageData?.chiefComplaint || 'Suspected acute trauma presentation'}</span>
               </div>
-              <div className="text-[11px] text-white/70 mt-0.5">
-                Mechanism: High-impact RTA. Hypotension and tachycardia detected.
+              <div className="text-[11px] text-white/70 mt-1">
+                {activeIncident?.triageData?.aiSummary || 'High urgency clinical protocol recommended. Prepare rapid surgical intake.'}
               </div>
             </div>
 
             {/* Recommended Protocol Checklist */}
             <div className="mt-3 space-y-1.5 text-left text-xs font-mono">
               <div className="text-[10px] font-mono uppercase text-white/40 font-semibold mb-1">
-                Recommended Protocol:
+                Recommended Protocol Checklist:
               </div>
               {activeChecklist.map((item) => (
                 <div
@@ -711,28 +719,28 @@ export default function ParamedicPortal() {
               className="px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-mono text-white/80 transition-all flex items-center justify-center gap-1"
             >
               <span>📄</span>
-              <span>View Protocol</span>
+              <span>Protocol</span>
             </button>
             <button
-              onClick={() => toast('💊 Pediatric & Adult Dosage Calculator Ready', { icon: '💉' })}
+              onClick={() => toast('💊 Drug Dosage: Fentanyl 50mcg IV / NS 500mL Bolus', { icon: '💉' })}
               className="px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-mono text-white/80 transition-all flex items-center justify-center gap-1"
             >
               <span>💉</span>
-              <span>Drug Dosages</span>
+              <span>Dosages</span>
             </button>
             <button
-              onClick={() => toast('🫁 Rapid Sequence Intubation Checklist Loaded', { icon: '🫁' })}
+              onClick={() => toast('🫁 Rapid Sequence Intubation Checklist Verified', { icon: '🫁' })}
               className="px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-mono text-white/80 transition-all flex items-center justify-center gap-1"
             >
               <span>🫁</span>
-              <span>Airway Mgmt</span>
+              <span>Airway</span>
             </button>
             <button
-              onClick={() => toast('📑 High-Impact RTA Assessment Verified', { icon: '📋' })}
+              onClick={() => toast('📑 High-Impact Trauma Checklist Confirmed', { icon: '📋' })}
               className="px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-mono text-white/80 transition-all flex items-center justify-center gap-1"
             >
               <span>📋</span>
-              <span>RTA Checklist</span>
+              <span>Checklist</span>
             </button>
           </div>
         </div>
@@ -756,7 +764,7 @@ export default function ParamedicPortal() {
                 {isRecordingVoice ? 'Recording Audio...' : 'Voice Log Notes'}
               </div>
               <div className="text-[10px] text-white/50 font-mono">
-                {isRecordingVoice ? 'Whisper transcribing' : 'Powered by Whisper STT'}
+                {isRecordingVoice ? 'Transcribing via Whisper' : 'AI Speech to Clinical Chart'}
               </div>
             </div>
           </button>
@@ -772,7 +780,7 @@ export default function ParamedicPortal() {
                 Transmit Vitals to ER
               </div>
               <div className="text-[10px] text-white/80 font-mono">
-                Send live patient data
+                Sync live telemetry to DB
               </div>
             </div>
           </button>
@@ -792,7 +800,7 @@ export default function ParamedicPortal() {
                 Arrived at Patient
               </div>
               <div className="text-[10px] text-emerald-400/70 font-mono">
-                Start care timeline
+                Update DB care timestamp
               </div>
             </div>
           </button>
@@ -802,17 +810,17 @@ export default function ParamedicPortal() {
             onClick={handleHandedOver}
             className={`h-full px-4 rounded-xl border flex items-center gap-3 transition-all ${
               dispatchStatus === 'COMPLETED'
-                ? 'bg-purple-600/30 border-purple-400 text-purple-300 font-bold'
-                : 'bg-white/[0.03] hover:bg-white/[0.07] border-white/10 text-white'
+                ? 'bg-blue-600/30 border-blue-400 text-blue-300 font-bold shadow-[0_0_15px_rgba(59,130,246,0.3)]'
+                : 'bg-blue-950/40 hover:bg-blue-900/60 border-blue-500/40 text-blue-300'
             }`}
           >
-            <span className="text-xl">🏁</span>
+            <span className="text-xl">🏥</span>
             <div className="text-left">
               <div className="text-xs font-bold leading-tight">
                 Patient Handed to ER
               </div>
-              <div className="text-[10px] text-white/50 font-mono">
-                Complete incident
+              <div className="text-[10px] text-blue-400/70 font-mono">
+                Mark incident completed
               </div>
             </div>
           </button>

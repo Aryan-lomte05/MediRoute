@@ -37,4 +37,25 @@ const authorize = (...roles) => {
   }
 }
 
-module.exports = { auth, authorize }
+const optionalAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return next()
+    }
+
+    const token = authHeader.substring(7)
+    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    const user = await User.findById(decoded.userId).select('-password')
+    if (user && user.isActive) {
+      req.user = user
+      req.userId = user._id
+    }
+    next()
+  } catch (err) {
+    // For optional auth, continue even if token is invalid or expired
+    next()
+  }
+}
+
+module.exports = { auth, authorize, optionalAuth }

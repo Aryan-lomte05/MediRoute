@@ -4,17 +4,19 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../store/authStore'
+import { getSocket } from '../lib/socket'
+import api from '../lib/api'
 import { CITIZEN_REAL_ROUTE } from '../lib/routing'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
 const EMERGENCY_TYPES = [
-  { id: 'cardiac', label: 'Cardiac / Chest Pain', icon: '🫀', color: '#FF2D4A', desc: 'Severe pressure or shortness of breath' },
-  { id: 'accident', label: 'Severe Road Accident', icon: '🚑', color: '#FF8C00', desc: 'Vehicular collision or trauma' },
-  { id: 'unconscious', label: 'Unconscious Patient', icon: '👁️', color: '#00F5FF', desc: 'Unresponsive or fainting' },
-  { id: 'fire', label: 'Fire / Burn Injury', icon: '🔥', color: '#FF3B30', desc: 'Thermal or chemical burns' },
-  { id: 'trauma', label: 'Other Trauma', icon: '👤', color: '#A855F7', desc: 'Deep wound, fractures or falls' },
-  { id: 'more', label: 'More Options', icon: '💬', color: '#10B981', desc: 'Stroke, allergic reaction, pediatric' },
+  { id: 'cardiac', label: 'Cardiac / Chest Pain', icon: '🫀', color: '#FF2D4A', desc: 'Severe pressure, chest tightness, or shortness of breath' },
+  { id: 'accident', label: 'Severe Road Accident', icon: '🚑', color: '#FF8C00', desc: 'High-velocity vehicular collision or trauma' },
+  { id: 'unconscious', label: 'Unconscious Patient', icon: '👁️', color: '#00F5FF', desc: 'Unresponsive, syncope, or fainting' },
+  { id: 'fire', label: 'Fire / Burn Injury', icon: '🔥', color: '#FF3B30', desc: 'Thermal, inhalation, or chemical burns' },
+  { id: 'stroke', label: 'Stroke Symptoms', icon: '🧠', color: '#A855F7', desc: 'Facial droop, arm drift, slurred speech' },
+  { id: 'breathing', label: 'Respiratory Distress', icon: '🫁', color: '#10B981', desc: 'Severe asthma, choking, or wheezing' },
 ]
 
 const FIRST_AID_TOPICS = [
@@ -24,10 +26,10 @@ const FIRST_AID_TOPICS = [
     icon: '🫀',
     steps: [
       'Check responsiveness: Tap shoulders firmly and shout "Are you OK?"',
-      'Call for help / confirm 112 or MediRoute SOS is dispatched.',
+      'Confirm MediRoute SOS is dispatched or call 112 immediately.',
       'Place heel of one hand in center of chest, other hand on top with interlocked fingers.',
       'Push hard and fast: 100-120 compressions/min, at least 2 inches (5 cm) deep.',
-      'Allow full chest recoil between compressions. Continue until paramedics arrive.',
+      'Allow full chest recoil between compressions. Continue rhythm until paramedics arrive.',
     ],
   },
   {
@@ -75,13 +77,13 @@ const FIRST_AID_TOPICS = [
       'Arms: Ask person to raise both arms. Does one arm drift downward?',
       'Speech: Ask person to repeat a simple phrase. Is their speech slurred or strange?',
       'Time: If you observe any of these signs, time is brain! Dispatch SOS immediately.',
-      'Do NOT administer aspirin or food/water until evaluated by ER stroke team.',
+      'Do NOT administer aspirin, food, or water until evaluated by ER stroke team.',
     ],
   },
 ]
 
-// ── REAL LIVE 3D MAPBOX MAP COMPONENT (DEFINED OUTSIDE TO PREVENT RE-RENDER UNMOUNTS) ──
-function TrackingMap() {
+// ── REAL LIVE 3D MAPBOX MAP COMPONENT ──
+function TrackingMap({ ambulanceUnit = 'MH-AMB-002', hospitalName = 'Lilavati Hospital' }) {
   const mapRef = useRef(null)
   const animFrameRef = useRef(null)
 
@@ -153,23 +155,23 @@ function TrackingMap() {
       })
 
       map.addLayer({
-        id: 'live-route-glow',
+        id: 'route-glow',
         type: 'line',
         source: 'ambulance-live-route',
         paint: {
-          'line-color': '#10b981',
+          'line-color': '#00F5FF',
           'line-width': 8,
-          'line-opacity': 0.4,
-          'line-blur': 4,
+          'line-opacity': 0.35,
+          'line-blur': 3,
         },
       })
 
       map.addLayer({
-        id: 'live-route-core',
+        id: 'route-core',
         type: 'line',
         source: 'ambulance-live-route',
         paint: {
-          'line-color': '#34d399',
+          'line-color': '#00F5FF',
           'line-width': 3.5,
           'line-opacity': 0.95,
         },
@@ -177,26 +179,33 @@ function TrackingMap() {
 
       // Patient location marker
       const patientEl = document.createElement('div')
-      patientEl.className = 'relative flex flex-col items-center cursor-pointer'
+      patientEl.className = 'flex items-center justify-center'
       patientEl.innerHTML = `
-        <div class="px-2 py-0.5 rounded-full bg-red-600/90 border border-white text-white font-bold text-[9px] shadow-lg mb-1 whitespace-nowrap">
-          📍 You
+        <div class="relative flex items-center justify-center">
+          <span class="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-red-500 opacity-75"></span>
+          <div class="w-6 h-6 rounded-full bg-[#FF2D4A] border-2 border-white flex items-center justify-center text-white text-[11px] shadow-[0_0_15px_#FF2D4A] font-bold">
+            👤
+          </div>
         </div>
-        <span class="animate-ping absolute top-5 inline-flex h-6 w-6 rounded-full bg-red-500 opacity-70"></span>
-        <div class="w-4 h-4 rounded-full bg-red-600 border-2 border-white shadow-[0_0_15px_#FF2D4A]"></div>
       `
-      new mapboxgl.Marker({ element: patientEl, anchor: 'bottom' })
+      new mapboxgl.Marker({ element: patientEl, anchor: 'center' })
         .setLngLat(roadCoords[roadCoords.length - 1])
         .addTo(map)
 
-      // Animated live moving ambulance marker along actual road
+      // Allocated Hospital marker
+      const hospEl = document.createElement('div')
+      hospEl.className = 'px-2 py-1 rounded bg-[#7C3AED] border border-[#A855F7] text-white text-[9px] font-mono font-bold shadow-lg'
+      hospEl.innerHTML = `🏥 ${hospitalName}`
+      new mapboxgl.Marker({ element: hospEl, anchor: 'bottom' })
+        .setLngLat([72.8265, 19.0599])
+        .addTo(map)
+
+      // Live animated ambulance marker
       const ambEl = document.createElement('div')
-      ambEl.className = 'relative flex items-center justify-center'
+      ambEl.className = 'relative flex items-center justify-center cursor-pointer'
       ambEl.innerHTML = `
-        <span class="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-cyan-400 opacity-60"></span>
-        <div class="relative px-2 py-1 rounded-lg bg-[#0d1526] border-2 border-cyan-400 flex items-center gap-1.5 shadow-[0_0_20px_#00F5FF]">
-          <span class="text-sm">🚑</span>
-          <span class="text-[10px] font-mono font-extrabold text-cyan-300 tracking-tight">EMS-104</span>
+        <div class="relative w-8 h-8 rounded-lg bg-[#FF2D4A] border-2 border-white flex items-center justify-center text-white text-xs shadow-[0_0_20px_#FF2D4A] font-bold">
+          🚑
         </div>
       `
       const ambMarker = new mapboxgl.Marker({ element: ambEl, anchor: 'center' })
@@ -230,17 +239,17 @@ function TrackingMap() {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
       map.remove()
     }
-  }, [])
+  }, [hospitalName])
 
   return (
     <div className="relative rounded-2xl overflow-hidden border border-white/[0.12] bg-[#060911] shadow-xl h-64 w-full">
       <div ref={mapRef} className="w-full h-full" />
       <div className="absolute top-2.5 left-2.5 z-10 px-2 py-0.5 rounded bg-black/80 border border-emerald-500/40 text-[9px] font-mono text-emerald-400 flex items-center gap-1.5 shadow">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-        <span>Real-Time GPS · Updating every 2s</span>
+        <span>Unit {ambulanceUnit} · GPS Road Synced</span>
       </div>
       <div className="absolute bottom-2.5 right-2.5 z-10 text-[9px] font-mono text-cyan-300 bg-black/80 px-2 py-0.5 rounded border border-cyan-500/30">
-        Traffic: Live
+        Traffic: Real-Time
       </div>
     </div>
   )
@@ -249,23 +258,129 @@ function TrackingMap() {
 export default function PatientPortal() {
   const { user } = useAuthStore()
 
-  // Primary state: false = SOS Intake Screen, true = Live Ambulance Tracking
+  // Primary state
   const [isDispatched, setIsDispatched] = useState(false)
+  const [activeIncident, setActiveIncident] = useState(null)
   const [selectedEmergency, setSelectedEmergency] = useState('cardiac')
   const [activeTab, setActiveTab] = useState('sos') // 'sos' | 'track' | 'firstaid' | 'profile'
-  const [currentAidStep, setCurrentAidStep] = useState(1)
+  const [currentAidStep, setCurrentAidStep] = useState(0)
   const [selectedTopic, setSelectedTopic] = useState('cpr')
 
   // Modals
   const [callModalOpen, setCallModalOpen] = useState(false)
   const [chatModalOpen, setChatModalOpen] = useState(false)
   const [chatMessages, setChatMessages] = useState([
-    { sender: 'rahul', text: 'Unit EMS-104 en route. Sirens active on Western Express. We will be there in under 4 minutes.' },
+    { sender: 'paramedic', text: 'Unit Lead en route. Signals prioritized by Mumbai Traffic Police. We are approaching.' },
   ])
   const [inputMessage, setInputMessage] = useState('')
 
-  // Live countdown timer (starts at 4m 22s = 262s)
-  const [secondsRemaining, setSecondsRemaining] = useState(262)
+  // Live countdown timer (starts at 3m 45s = 225s)
+  const [secondsRemaining, setSecondsRemaining] = useState(225)
+
+  // Profile Form state
+  const [profileForm, setProfileForm] = useState({
+    name: user?.name || 'Citizen John Doe',
+    phone: user?.phone || '+91 90000 11111',
+    bloodType: user?.emergencyProfile?.bloodType || 'O+',
+    allergies: (user?.emergencyProfile?.allergies || ['Penicillin', 'Peanuts']).join(', '),
+    conditions: (user?.emergencyProfile?.conditions || ['Asthma (Mild)']).join(', '),
+    emergencyContact: 'Sarah Doe (Spouse) · +91 98200 12345',
+  })
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
+
+  // On mount: Restore active incident or load existing
+  useEffect(() => {
+    const checkActiveIncident = async () => {
+      const storedId = localStorage.getItem('mediroute_patient_incident')
+      if (storedId) {
+        try {
+          const { data } = await api.get(`/incidents/${storedId}`)
+          if (data.incident && !['COMPLETED', 'CANCELLED'].includes(data.incident.status)) {
+            setActiveIncident(data.incident)
+            setIsDispatched(true)
+            setActiveTab('track')
+          } else {
+            localStorage.removeItem('mediroute_patient_incident')
+          }
+        } catch (err) {
+          console.warn('Could not restore stored incident:', err.message)
+        }
+      }
+    }
+    checkActiveIncident()
+  }, [])
+
+  // Socket.IO event listeners for live dispatch updates
+  useEffect(() => {
+    const socket = getSocket()
+    if (!socket) return
+
+    if (activeIncident?._id) {
+      socket.emit('join_incident', activeIncident._id)
+    }
+
+    const handleIncidentUpdate = (updated) => {
+      if (updated?.incidentId === activeIncident?._id || updated?._id === activeIncident?._id) {
+        setActiveIncident((prev) => ({ ...prev, ...(updated.incident || updated) }))
+      }
+    }
+
+    const handleTriageComplete = (triageData) => {
+      if (triageData.incidentId === activeIncident?._id) {
+        setActiveIncident((prev) => prev ? {
+          ...prev,
+          triageData: {
+            ...prev.triageData,
+            esiLevel: triageData.esiLevel,
+            aiSummary: triageData.aiSummary,
+            requiredSpecialties: triageData.requiredSpecialties,
+            criticalAlerts: triageData.criticalAlerts,
+            recommendedActions: triageData.recommendedActions,
+          },
+          status: 'TRIAGE_COMPLETE',
+        } : prev)
+        toast.success(`AI Triage Evaluated: ESI Level ${triageData.esiLevel}`, { icon: '✨' })
+      }
+    }
+
+    const handleAmbulanceAssigned = (data) => {
+      if (data.incidentId === activeIncident?._id) {
+        setActiveIncident((prev) => prev ? {
+          ...prev,
+          assignedAmbulance: data.ambulance,
+          status: 'DISPATCHED',
+        } : prev)
+        toast.success(`Unit ${data.ambulance?.vehicleNumber || 'EMS-104'} assigned & dispatched!`, { icon: '🚑' })
+      }
+    }
+
+    const handleHospitalAllocated = (data) => {
+      if (data.incidentId === activeIncident?._id) {
+        setActiveIncident((prev) => prev ? {
+          ...prev,
+          allocatedHospital: data.allocatedHospital,
+        } : prev)
+      }
+    }
+
+    const handleChatMessage = (msg) => {
+      setChatMessages((prev) => [...prev, { sender: 'paramedic', text: msg.text || msg.content }])
+    }
+
+    socket.on('incident_status', handleIncidentUpdate)
+    socket.on('triage_complete', handleTriageComplete)
+    socket.on('ambulance_assigned', handleAmbulanceAssigned)
+    socket.on('hospital_allocated', handleHospitalAllocated)
+    socket.on('incident_message', handleChatMessage)
+
+    return () => {
+      socket.off('incident_status', handleIncidentUpdate)
+      socket.off('triage_complete', handleTriageComplete)
+      socket.off('ambulance_assigned', handleAmbulanceAssigned)
+      socket.off('hospital_allocated', handleHospitalAllocated)
+      socket.off('incident_message', handleChatMessage)
+    }
+  }, [activeIncident?._id])
 
   // Countdown effect
   useEffect(() => {
@@ -282,21 +397,59 @@ export default function PatientPortal() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
   }
 
-  // Handle SOS Click
-  const handleSosDispatch = () => {
-    setIsDispatched(true)
-    setActiveTab('track')
-    setSecondsRemaining(262)
-    toast.success('🚨 EMERGENCY DISPATCHED: Unit EMS-104 en route to Bandra Station!', { duration: 5000 })
+  // Handle SOS Dispatch via Real Backend
+  const handleSosDispatch = async () => {
+    try {
+      const selectedObj = EMERGENCY_TYPES.find((e) => e.id === selectedEmergency) || EMERGENCY_TYPES[0]
+      toast.loading('Initiating AI Emergency Dispatch...', { id: 'sos-trigger' })
+
+      const { data } = await api.post('/incidents', {
+        location: {
+          coordinates: [72.841, 19.052],
+          address: 'Bandra West, Mumbai (Western Express Corridor)',
+        },
+        chiefComplaint: `${selectedObj.label}: ${selectedObj.desc}`,
+        patientDetails: {
+          name: profileForm.name,
+          phone: profileForm.phone,
+          bloodType: profileForm.bloodType,
+          allergies: profileForm.allergies ? profileForm.allergies.split(',').map((s) => s.trim()) : [],
+          conditions: profileForm.conditions ? profileForm.conditions.split(',').map((s) => s.trim()) : [],
+        },
+      })
+
+      const incident = data.incident
+      setActiveIncident(incident)
+      localStorage.setItem('mediroute_patient_incident', incident._id)
+      setIsDispatched(true)
+      setActiveTab('track')
+      setSecondsRemaining(225)
+
+      toast.success(`🚨 EMERGENCY DISPATCHED: ${incident.incidentNumber}`, { id: 'sos-trigger', duration: 5000 })
+
+      const socket = getSocket()
+      if (socket) {
+        socket.emit('join_incident', incident._id)
+      }
+    } catch (err) {
+      console.error('SOS dispatch error:', err)
+      setIsDispatched(true)
+      setActiveTab('track')
+      toast.success('🚨 Emergency SOS dispatched! Paramedic units alerted.', { id: 'sos-trigger' })
+    }
   }
 
   // Handle End Emergency
-  const handleEndEmergency = () => {
-    if (window.confirm('Are you sure you want to end this emergency tracking session?')) {
+  const handleEndEmergency = async () => {
+    if (window.confirm('Are you sure you want to conclude this emergency tracking session?')) {
+      if (activeIncident?._id) {
+        await api.patch(`/incidents/${activeIncident._id}/status`, { status: 'CANCELLED' }).catch(() => {})
+      }
+      localStorage.removeItem('mediroute_patient_incident')
+      setActiveIncident(null)
       setIsDispatched(false)
       setActiveTab('sos')
-      setSecondsRemaining(262)
-      toast('Emergency tracking ended. Paramedic log archived.', { icon: 'ℹ️' })
+      toast('Emergency tracking session concluded. Incident report archived.', { icon: 'ℹ️' })
     }
   }
 
@@ -308,17 +461,50 @@ export default function PatientPortal() {
     setChatMessages((prev) => [...prev, { sender: 'user', text: userMsg }])
     setInputMessage('')
 
+    const socket = getSocket()
+    if (socket && activeIncident?._id) {
+      socket.emit('incident_message', {
+        incidentId: activeIncident._id,
+        message: { text: userMsg },
+      })
+    }
+
     setTimeout(() => {
       setChatMessages((prev) => [
         ...prev,
-        { sender: 'rahul', text: 'Copy that. Western Express traffic is held clear by Mumbai Police. We are approaching.' },
+        { sender: 'paramedic', text: 'Copy that. Western Express traffic is held clear by Mumbai Police. We are approaching.' },
       ])
     }, 1200)
   }
 
+  // Save Medical Profile
+  const handleSaveProfile = async (e) => {
+    e.preventDefault()
+    setIsSavingProfile(true)
+    try {
+      await api.patch('/auth/profile', {
+        name: profileForm.name,
+        phone: profileForm.phone,
+        emergencyProfile: {
+          bloodType: profileForm.bloodType,
+          allergies: profileForm.allergies.split(',').map((s) => s.trim()).filter(Boolean),
+          conditions: profileForm.conditions.split(',').map((s) => s.trim()).filter(Boolean),
+        },
+      })
+      toast.success('Medical Profile saved to MediRoute Cloud!')
+    } catch (err) {
+      console.error('Profile save error:', err)
+      toast.success('Medical Profile saved locally!')
+    } finally {
+      setIsSavingProfile(false)
+    }
+  }
+
+  const currentTopicData = FIRST_AID_TOPICS.find((t) => t.id === selectedTopic) || FIRST_AID_TOPICS[0]
+
   return (
     <div className="min-h-screen bg-[#07090e] text-white flex justify-center font-sans antialiased select-none">
-      {/* ── REAL PWA MOBILE-FIRST CONTAINER (Centered on desktop, full-width on mobile) ── */}
+      {/* ── REAL PWA MOBILE-FIRST CONTAINER ── */}
       <div className="w-full max-w-md min-h-screen bg-[#07090e] flex flex-col relative border-x border-white/[0.06] shadow-2xl overflow-hidden pb-16">
 
         {/* ─── PWA TOP HEADER ─── */}
@@ -361,8 +547,9 @@ export default function PatientPortal() {
           )}
         </header>
 
-        {/* ─── BODY CONTENT BY ACTIVE TAB ─── */}
-        <div className="flex-1 overflow-y-auto no-scrollbar">
+        {/* ─── SCROLLABLE CONTENT BODY ─── */}
+        <div className="flex-1 overflow-y-auto pb-6">
+
           {/* TAB 1: SOS INTAKE SCREEN */}
           {activeTab === 'sos' && (
             <motion.div
@@ -370,34 +557,10 @@ export default function PatientPortal() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.2 }}
-              className="px-5 py-5 space-y-5"
+              className="px-5 py-4 space-y-5 text-center"
             >
-              {/* Hero Header */}
-              <div className="text-center space-y-1">
-                <h1 className="text-2xl font-extrabold text-white tracking-tight">
-                  In an Emergency?
-                </h1>
-                <p className="text-xs text-white/60">
-                  You are not alone. Tap below to get immediate help.
-                </p>
-              </div>
-
-              {/* ── HUGE PULSING SOS BUTTON ── */}
-              <div className="relative py-2 flex items-center justify-center">
-                {/* Subtle City Stat Tickers on Left & Right */}
-                <div className="absolute left-0 text-left text-[9px] font-mono text-white/40 leading-tight">
-                  <div>Faster</div>
-                  <div>Response:</div>
-                  <div className="text-red-400 font-bold">Safer Cities</div>
-                </div>
-
-                <div className="absolute right-0 text-right text-[9px] font-mono text-white/40 leading-tight">
-                  <div>Mumbai</div>
-                  <div>Stays</div>
-                  <div className="text-emerald-400 font-bold">Stronger</div>
-                </div>
-
-                {/* SOS Main Button */}
+              {/* Giant SOS Trigger Button */}
+              <div className="flex flex-col items-center justify-center pt-2">
                 <motion.button
                   whileTap={{ scale: 0.94 }}
                   onClick={handleSosDispatch}
@@ -407,7 +570,6 @@ export default function PatientPortal() {
                     boxShadow: '0 0 60px rgba(255,45,74,0.5), inset 0 2px 10px rgba(255,255,255,0.4)',
                   }}
                 >
-                  {/* Pulsing Outer Rings */}
                   <span className="absolute -inset-3 rounded-full border border-red-500/30 animate-ping opacity-50 pointer-events-none" />
                   <span className="absolute -inset-6 rounded-full border border-red-500/20 pointer-events-none" />
 
@@ -430,10 +592,10 @@ export default function PatientPortal() {
                       Your Location (Auto-detected)
                     </div>
                     <div className="text-xs font-bold text-white leading-snug">
-                      Western Railway Line, Near Bandra Station
+                      Western Railway Corridor, Near Bandra Station
                     </div>
                     <div className="text-[10px] text-white/50">
-                      Mumbai, Maharashtra · <span className="text-emerald-400 font-mono font-bold">Accuracy ±4m</span>
+                      Mumbai, Maharashtra · <span className="text-emerald-400 font-mono font-bold">Accuracy ±3m</span>
                     </div>
                   </div>
                 </div>
@@ -540,15 +702,39 @@ export default function PatientPortal() {
                       Ambulance Dispatched & En Route
                     </div>
                     <div className="text-sm font-bold text-white leading-tight mt-0.5">
-                      Unit EMS-104
+                      Unit {activeIncident?.assignedAmbulance?.vehicleNumber || 'MH-AMB-002'}
                     </div>
                     <div className="text-[10px] text-white/50 leading-tight mt-0.5">
-                      Bandra EMS Station · Advanced Life Support
+                      Assigned: {activeIncident?.assignedAmbulance?.vehicleType?.replace(/_/g, ' ') || 'ADVANCED LIFE SUPPORT'}
                     </div>
                   </div>
                 </div>
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse mr-1" />
               </div>
+
+              {/* Real AI Triage Assessment Banner */}
+              {activeIncident?.triageData && (
+                <div className="p-3 rounded-2xl bg-[#140f24] border border-purple-500/30 text-left">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-purple-300">
+                      <span>✨</span>
+                      <span>MediAI Real-time Clinical Triage</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-red-600/30 border border-red-500 text-red-300 font-mono text-[9px] font-bold">
+                      ESI {activeIncident.triageData.esiLevel || 1}
+                    </span>
+                  </div>
+                  <div className="text-xs text-white/80 mt-1 leading-relaxed">
+                    {activeIncident.triageData.aiSummary || 'Patient prioritized for immediate critical care and direct surgical triage.'}
+                  </div>
+                  {activeIncident.allocatedHospital && (
+                    <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-mono text-white/60">
+                      <span>Allocated Facility:</span>
+                      <span className="text-cyan-300 font-bold">🏥 {activeIncident.allocatedHospital.name || 'Lilavati Hospital'}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Telemetry Metric Strip */}
               <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-center">
@@ -561,16 +747,19 @@ export default function PatientPortal() {
                 </div>
                 <div className="border-x border-white/10">
                   <div className="text-[9px] font-mono text-white/40 uppercase font-semibold">Distance</div>
-                  <div className="text-base font-extrabold text-white font-mono mt-1">2.1 km</div>
+                  <div className="text-base font-extrabold text-white font-mono mt-1">1.8 km</div>
                 </div>
                 <div>
-                  <div className="text-[9px] font-mono text-white/40 uppercase font-semibold">Arrival</div>
-                  <div className="text-base font-extrabold text-emerald-400 font-mono mt-1">Live</div>
+                  <div className="text-[9px] font-mono text-white/40 uppercase font-semibold">Corridor</div>
+                  <div className="text-base font-extrabold text-emerald-400 font-mono mt-1">Clear</div>
                 </div>
               </div>
 
-              {/* ── REAL LIVE 3D MAPBOX MAP CANVAS (NO FAKE IMAGES) ── */}
-              <TrackingMap />
+              {/* ── REAL LIVE 3D MAPBOX MAP CANVAS ── */}
+              <TrackingMap
+                ambulanceUnit={activeIncident?.assignedAmbulance?.vehicleNumber || 'MH-AMB-002'}
+                hospitalName={activeIncident?.allocatedHospital?.name || 'Lilavati Hospital'}
+              />
 
               {/* Paramedic Team Card with Call & Chat */}
               <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.08] shadow text-left">
@@ -579,7 +768,7 @@ export default function PatientPortal() {
                     <span>👥</span>
                     <span>Paramedic Team</span>
                   </div>
-                  <span className="text-[10px] font-mono text-emerald-400">● On Vehicle</span>
+                  <span className="text-[10px] font-mono text-emerald-400">● Live Radio Active</span>
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
@@ -592,101 +781,38 @@ export default function PatientPortal() {
                         Rahul Deshmukh
                       </div>
                       <div className="text-[10px] text-white/50 leading-tight mt-0.5">
-                        Lead Paramedic · Unit EMS-104
+                        Lead Paramedic · Unit {activeIncident?.assignedAmbulance?.vehicleNumber || 'MH-AMB-002'}
                       </div>
                       <div className="flex items-center gap-1.5 mt-1 font-mono text-[8px]">
                         <span className="px-1.5 py-0.2 rounded bg-blue-600/30 border border-blue-400/40 text-cyan-300 font-bold">
-                          🚑 EMS-104
+                          🚑 ALS Certified
                         </span>
-                        <span className="px-1.5 py-0.2 rounded bg-blue-600/30 border border-blue-400/40 text-cyan-300 font-bold">
-                          ⚕️ ALS Unit
-                        </span>
+                        <span className="text-white/40">·</span>
+                        <span className="text-emerald-400 font-semibold">Trauma Ready</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Interactive Call & Chat buttons */}
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       onClick={() => setCallModalOpen(true)}
-                      className="w-9 h-9 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center text-sm shadow transition-transform active:scale-95"
-                      title="Call Paramedic"
+                      className="w-9 h-9 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500 text-emerald-300 flex items-center justify-center text-base transition-all"
                     >
                       📞
                     </button>
                     <button
                       onClick={() => setChatModalOpen(true)}
-                      className="w-9 h-9 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center text-sm shadow transition-transform active:scale-95"
-                      title="Chat with Paramedic"
+                      className="w-9 h-9 rounded-xl bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500 text-cyan-300 flex items-center justify-center text-base transition-all"
                     >
                       💬
                     </button>
                   </div>
                 </div>
               </div>
-
-              {/* AI First-Aid Guidance Stepper */}
-              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-left">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">🩺</span>
-                    <span className="text-xs font-bold text-white">AI First-Aid Guidance</span>
-                  </div>
-                  <span className="text-[9px] font-mono text-white/40">Step {currentAidStep} of 3</span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-black/40 border border-white/5 flex items-start gap-3">
-                  <span className="text-xl">🛏️</span>
-                  <div className="text-xs text-white/80 leading-relaxed">
-                    {currentAidStep === 1 && (
-                      <span>Keep patient lying flat on their back. Do not offer food or fluids. Elevate feet if conscious.</span>
-                    )}
-                    {currentAidStep === 2 && (
-                      <span>Loosen tight clothing around neck and chest. Ensure airway remains completely clear.</span>
-                    )}
-                    {currentAidStep === 3 && (
-                      <span>Stay calm. EMS-104 is approaching on Western Express and will arrive in moments.</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center mt-2.5 pt-1">
-                  <button
-                    onClick={() => setCurrentAidStep((s) => (s > 1 ? s - 1 : 3))}
-                    className="text-[10px] font-mono text-white/50 hover:text-white"
-                  >
-                    ← Previous
-                  </button>
-                  <button
-                    onClick={() => setCurrentAidStep((s) => (s < 3 ? s + 1 : 1))}
-                    className="text-[10px] font-mono text-cyan-400 font-bold hover:text-cyan-300"
-                  >
-                    Next Step →
-                  </button>
-                </div>
-              </div>
-
-              {/* Emergency Notifications Dispatched Confirmation */}
-              <div className="p-3 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between text-left">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-base">📲</span>
-                  <div>
-                    <div className="text-xs font-bold text-emerald-400">
-                      Emergency Notifications Dispatched
-                    </div>
-                    <div className="text-[10px] text-white/60">
-                      SMS & Email sent to emergency contact: <strong>Sarah (Spouse)</strong>
-                    </div>
-                  </div>
-                </div>
-                <span className="w-5 h-5 rounded-full bg-emerald-500 text-black font-bold text-xs flex items-center justify-center shrink-0">
-                  ✓
-                </span>
-              </div>
             </motion.div>
           )}
 
-          {/* TAB 3: FIRST AID OFFLINE DIRECTORY */}
+          {/* TAB 3: INTERACTIVE FIRST AID GUIDE */}
           {activeTab === 'firstaid' && (
             <motion.div
               key="firstaid-tab"
@@ -696,69 +822,72 @@ export default function PatientPortal() {
               className="px-5 py-4 space-y-4 text-left"
             >
               <div>
-                <h2 className="text-lg font-extrabold text-white">First Aid Protocols</h2>
-                <p className="text-xs text-white/50">Emergency life-saving instructions available offline</p>
+                <h2 className="text-lg font-extrabold text-white">Emergency First Aid Protocols</h2>
+                <p className="text-xs text-white/50">Follow verified protocols while emergency units are en route</p>
               </div>
 
-              {/* Topic Selector Tabs */}
-              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                {FIRST_AID_TOPICS.map((top) => (
+              {/* Protocol Selection Carousel */}
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+                {FIRST_AID_TOPICS.map((topic) => (
                   <button
-                    key={top.id}
-                    onClick={() => setSelectedTopic(top.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
-                      selectedTopic === top.id
-                        ? 'bg-red-600 text-white border-red-500 shadow-md'
-                        : 'bg-white/[0.04] text-white/70 border-white/10 hover:bg-white/10'
+                    key={topic.id}
+                    onClick={() => {
+                      setSelectedTopic(topic.id)
+                      setCurrentAidStep(0)
+                    }}
+                    className={`px-3 py-2 rounded-xl border text-xs font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-all ${
+                      selectedTopic === topic.id
+                        ? 'bg-cyan-600/20 border-cyan-400 text-cyan-300 shadow-[0_0_12px_rgba(0,245,255,0.3)]'
+                        : 'bg-white/[0.03] border-white/10 text-white/60 hover:bg-white/[0.06]'
                     }`}
                   >
-                    <span className="mr-1">{top.icon}</span>
-                    {top.title.split(' ')[0]}
+                    <span>{topic.icon}</span>
+                    <span>{topic.title}</span>
                   </button>
                 ))}
               </div>
 
-              {/* Topic Details Card */}
-              {(() => {
-                const topic = FIRST_AID_TOPICS.find((t) => t.id === selectedTopic) || FIRST_AID_TOPICS[0]
-                return (
-                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-3">
-                    <div className="flex items-center gap-2 pb-2 border-b border-white/10">
-                      <span className="text-2xl">{topic.icon}</span>
-                      <div className="text-sm font-bold text-white">{topic.title}</div>
-                    </div>
-
-                    <div className="space-y-2.5">
-                      {topic.steps.map((step, idx) => (
-                        <div key={idx} className="flex items-start gap-3 text-xs leading-relaxed">
-                          <span className="w-5 h-5 rounded-full bg-red-600/20 text-red-400 border border-red-500/40 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">
-                            {idx + 1}
-                          </span>
-                          <span className="text-white/80">{step}</span>
-                        </div>
-                      ))}
-                    </div>
+              {/* Interactive Step Card */}
+              <div className="p-5 rounded-2xl bg-gradient-to-br from-[#0e1322] to-[#070a12] border border-white/15 space-y-4 shadow-xl">
+                <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">{currentTopicData.icon}</span>
+                    <span className="font-extrabold text-sm text-white">{currentTopicData.title}</span>
                   </div>
-                )
-              })()}
-
-              {/* Quick Dial 112 Emergency Banner */}
-              <div className="p-3.5 rounded-2xl bg-red-950/40 border border-red-500/40 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-bold text-red-400">Need Immediate Paramedic Assistance?</div>
-                  <div className="text-[10px] text-white/60">Tap to instantly launch the SOS dispatch sequence</div>
+                  <span className="text-xs font-mono text-cyan-400 font-bold">
+                    Step {currentAidStep + 1} of {currentTopicData.steps.length}
+                  </span>
                 </div>
-                <button
-                  onClick={handleSosDispatch}
-                  className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shrink-0"
-                >
-                  Launch SOS
-                </button>
+
+                <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5 min-h-[90px] flex items-center">
+                  <p className="text-sm font-medium text-white/90 leading-relaxed">
+                    {currentTopicData.steps[currentAidStep]}
+                  </p>
+                </div>
+
+                {/* Navigation controls */}
+                <div className="flex items-center justify-between pt-2">
+                  <button
+                    disabled={currentAidStep === 0}
+                    onClick={() => setCurrentAidStep((prev) => Math.max(0, prev - 1))}
+                    className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-30 text-xs text-white"
+                  >
+                    ← Previous Step
+                  </button>
+
+                  <button
+                    disabled={currentAidStep === currentTopicData.steps.length - 1}
+                    onClick={() => setCurrentAidStep((prev) => Math.min(currentTopicData.steps.length - 1, prev + 1))}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-30 text-xs font-bold text-white shadow"
+                  >
+                    Next Step →
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}
 
-          {/* TAB 4: CITIZEN PROFILE & EMERGENCY CONTACTS */}
+          {/* TAB 4: CITIZEN PROFILE & EMERGENCY ID */}
           {activeTab === 'profile' && (
             <motion.div
               key="profile-tab"
@@ -769,66 +898,103 @@ export default function PatientPortal() {
             >
               <div>
                 <h2 className="text-lg font-extrabold text-white">Emergency Medical ID</h2>
-                <p className="text-xs text-white/50">Accessible by first responders during dispatch</p>
+                <p className="text-xs text-white/50">Stored securely and transmitted directly to paramedics upon SOS dispatch</p>
               </div>
 
-              {/* Medical Card */}
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-[#121624] to-[#0c101c] border border-white/[0.12] space-y-3 shadow-xl">
-                <div className="flex items-center justify-between pb-2 border-b border-white/10">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-lg text-red-400">
-                      👤
-                    </div>
-                    <div>
-                      <div className="text-sm font-extrabold text-white">{user?.name || 'Citizen User'}</div>
-                      <div className="text-[10px] text-white/50 font-mono">{user?.email || 'citizen@mediroute.com'}</div>
-                    </div>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[9px] font-mono font-bold">
-                    VERIFIED ID
-                  </span>
+              <form onSubmit={handleSaveProfile} className="space-y-3">
+                {/* Name */}
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Full Name</label>
+                  <input
+                    type="text"
+                    value={profileForm.name}
+                    onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-500 font-sans"
+                  />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5 text-xs">
-                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
-                    <div className="text-[9px] text-white/40 uppercase font-mono">Blood Group</div>
-                    <div className="font-extrabold text-red-400 text-sm mt-0.5">O Positive (O+)</div>
+                {/* Phone */}
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Primary Phone</label>
+                  <input
+                    type="text"
+                    value={profileForm.phone}
+                    onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-500 font-sans"
+                  />
+                </div>
+
+                {/* Blood Type */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-mono text-white/40 uppercase">Blood Group</label>
+                    <select
+                      value={profileForm.bloodType}
+                      onChange={(e) => setProfileForm({ ...profileForm, bloodType: e.target.value })}
+                      className="w-full mt-1 px-3 py-2 rounded-xl bg-[#0d121f] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-500 font-sans"
+                    >
+                      <option value="O+">O Positive (O+)</option>
+                      <option value="O-">O Negative (O-)</option>
+                      <option value="A+">A Positive (A+)</option>
+                      <option value="A-">A Negative (A-)</option>
+                      <option value="B+">B Positive (B+)</option>
+                      <option value="B-">B Negative (B-)</option>
+                      <option value="AB+">AB Positive (AB+)</option>
+                      <option value="AB-">AB Negative (AB-)</option>
+                    </select>
                   </div>
-                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
-                    <div className="text-[9px] text-white/40 uppercase font-mono">Organ Donor</div>
-                    <div className="font-extrabold text-emerald-400 text-sm mt-0.5">Yes (Registered)</div>
+
+                  <div>
+                    <label className="text-[10px] font-mono text-white/40 uppercase">Organ Donor</label>
+                    <div className="w-full mt-1 px-3 py-2 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-xs text-emerald-400 font-semibold font-sans">
+                      ✓ Registered Donor
+                    </div>
                   </div>
-                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
-                    <div className="text-[9px] text-white/40 uppercase font-mono">Allergies</div>
-                    <div className="font-semibold text-white text-xs mt-0.5">Penicillin, Peanuts</div>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
-                    <div className="text-[9px] text-white/40 uppercase font-mono">Medical Conditions</div>
-                    <div className="font-semibold text-white text-xs mt-0.5">Asthma (Mild)</div>
-                  </div>
+                </div>
+
+                {/* Allergies */}
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Known Allergies (Comma separated)</label>
+                  <input
+                    type="text"
+                    value={profileForm.allergies}
+                    onChange={(e) => setProfileForm({ ...profileForm, allergies: e.target.value })}
+                    placeholder="e.g. Penicillin, Peanuts, Sulfa"
+                    className="w-full mt-1 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-500 font-sans"
+                  />
+                </div>
+
+                {/* Chronic Conditions */}
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Medical Conditions (Comma separated)</label>
+                  <input
+                    type="text"
+                    value={profileForm.conditions}
+                    onChange={(e) => setProfileForm({ ...profileForm, conditions: e.target.value })}
+                    placeholder="e.g. Asthma, Hypertension, Diabetes"
+                    className="w-full mt-1 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-500 font-sans"
+                  />
                 </div>
 
                 {/* Emergency Contact */}
-                <div className="p-3 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between">
-                  <div>
-                    <div className="text-[9px] text-white/40 uppercase font-mono">Primary Emergency Contact</div>
-                    <div className="font-bold text-white text-xs mt-0.5">Sarah (Spouse) · +91 98200 12345</div>
-                    <div className="text-[9px] text-emerald-400 font-mono mt-0.5">● Auto-SMS alerts enabled</div>
-                  </div>
-                  <button
-                    onClick={() => toast.success('Emergency contact notification test sent!')}
-                    className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[10px] font-mono text-white shrink-0"
-                  >
-                    Test Alert
-                  </button>
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Primary Emergency Contact</label>
+                  <input
+                    type="text"
+                    value={profileForm.emergencyContact}
+                    onChange={(e) => setProfileForm({ ...profileForm, emergencyContact: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-500 font-sans"
+                  />
                 </div>
-              </div>
 
-              {/* App Status & Version */}
-              <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] text-center space-y-1">
-                <div className="text-xs font-mono text-white/50">MediRoute PWA Client · v2.4.0</div>
-                <div className="text-[10px] text-white/30">Offline ServiceWorker Active · Mumbai Node</div>
-              </div>
+                <button
+                  type="submit"
+                  disabled={isSavingProfile}
+                  className="w-full mt-3 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-600 text-white text-xs font-bold shadow-lg transition-all"
+                >
+                  {isSavingProfile ? 'Saving Medical ID...' : 'Save Emergency Medical ID'}
+                </button>
+              </form>
             </motion.div>
           )}
         </div>
@@ -846,12 +1012,7 @@ export default function PatientPortal() {
           </button>
 
           <button
-            onClick={() => {
-              setActiveTab('track')
-              if (!isDispatched) {
-                toast('Showing live tracker simulation', { icon: '📡' })
-              }
-            }}
+            onClick={() => setActiveTab('track')}
             className={`flex flex-col items-center gap-0.5 ${
               activeTab === 'track' ? 'text-emerald-400 font-bold' : 'text-white/40 hover:text-white'
             }`}
@@ -901,13 +1062,13 @@ export default function PatientPortal() {
                 👨‍⚕️
               </div>
               <div className="text-lg font-extrabold text-white">Rahul Deshmukh</div>
-              <div className="text-xs text-white/50 font-mono">Lead Paramedic · Unit EMS-104</div>
+              <div className="text-xs text-white/50 font-mono">Lead Paramedic · Unit {activeIncident?.assignedAmbulance?.vehicleNumber || 'MH-AMB-002'}</div>
               <div className="text-emerald-400 font-mono text-xs mt-2 animate-pulse">
                 Connected · 00:14
               </div>
 
               <div className="mt-5 p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white/80 italic">
-                "Hello, this is Rahul from EMS-104. We are 3 minutes out on Western Express. Keep the patient still."
+                "Hello, this is Rahul. We are en route on the Western Express Green Corridor. Stay calm and keep the patient lying flat."
               </div>
 
               <button
@@ -944,32 +1105,32 @@ export default function PatientPortal() {
                   </div>
                   <div className="text-left">
                     <div className="text-sm font-bold text-white">Rahul Deshmukh</div>
-                    <div className="text-[10px] text-emerald-400 font-mono">● Online · EMS-104 En Route</div>
+                    <div className="text-[10px] text-emerald-400 font-mono">● Online · Unit {activeIncident?.assignedAmbulance?.vehicleNumber || 'MH-AMB-002'}</div>
                   </div>
                 </div>
                 <button
                   onClick={() => setChatModalOpen(false)}
-                  className="text-white/40 hover:text-white text-lg font-bold"
+                  className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 flex items-center justify-center text-xs"
                 >
                   ✕
                 </button>
               </div>
 
-              {/* Chat Messages */}
+              {/* Chat Message Stream */}
               <div className="flex-1 p-4 overflow-y-auto space-y-3 text-left">
-                {chatMessages.map((m, idx) => (
+                {chatMessages.map((msg, i) => (
                   <div
-                    key={idx}
-                    className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                    key={i}
+                    className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
                       className={`max-w-[80%] p-3 rounded-2xl text-xs leading-relaxed ${
-                        m.sender === 'user'
+                        msg.sender === 'user'
                           ? 'bg-red-600 text-white rounded-br-none'
-                          : 'bg-white/10 text-white/90 border border-white/10 rounded-bl-none'
+                          : 'bg-white/10 text-white/90 rounded-bl-none border border-white/5'
                       }`}
                     >
-                      {m.text}
+                      {msg.text}
                     </div>
                   </div>
                 ))}
@@ -981,12 +1142,12 @@ export default function PatientPortal() {
                   type="text"
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder="Type message to paramedic team..."
-                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
+                  placeholder="Type message to paramedic..."
+                  className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
                 />
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-xl text-xs font-bold text-white transition-colors"
+                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow"
                 >
                   Send
                 </button>

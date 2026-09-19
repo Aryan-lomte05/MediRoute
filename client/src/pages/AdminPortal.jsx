@@ -510,7 +510,33 @@ export default function AdminPortal() {
     },
   ]
 
-  const filteredFeed = defaultIncidentFeed.filter((item) => {
+  const displayFeed = incidents.length > 0
+    ? incidents.map((inc) => {
+        const esi = inc.triageData?.esiLevel || 2
+        const colorMap = { 1: '#FF2D4A', 2: '#FF8C00', 3: '#3B82F6', 4: '#10B981', 5: '#6B7280' }
+        const createdDate = new Date(inc.createdAt || Date.now())
+        const timeStr = createdDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
+        return {
+          id: inc.incidentNumber || `INC-${inc._id.slice(-4)}`,
+          mongoId: inc._id,
+          time: timeStr,
+          channel: 'app',
+          esi,
+          title: inc.triageData?.chiefComplaint || 'Emergency SOS Dispatch',
+          aiSummary: inc.triageData?.aiSummary || 'Immediate emergency medical response deployed.',
+          location: inc.location?.address || 'Mumbai, Maharashtra',
+          assigned: inc.assignedAmbulance?.vehicleNumber || 'Dispatching',
+          allocatedHospital: inc.allocatedHospital?.name || 'Lilavati Hospital',
+          eta: '4-6 min',
+          status: inc.status,
+          accentColor: colorMap[esi] || '#FF2D4A',
+          coords: inc.location?.coordinates || [72.841, 19.052],
+          raw: inc,
+        }
+      })
+    : defaultIncidentFeed
+
+  const filteredFeed = displayFeed.filter((item) => {
     const matchesSearch =
       item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -525,6 +551,14 @@ export default function AdminPortal() {
     if (selectedEsiFilter === 'ESI-4+') return item.esi >= 4
     return true
   })
+
+  const esiCounts = {
+    all: displayFeed.length,
+    esi1: displayFeed.filter((i) => i.esi === 1).length,
+    esi2: displayFeed.filter((i) => i.esi === 2).length,
+    esi3: displayFeed.filter((i) => i.esi === 3).length,
+    esi4: displayFeed.filter((i) => i.esi >= 4).length,
+  }
 
   // TFT Surge Forecast Chart Data
   const forecastChartData = surgeForecast.length
@@ -678,7 +712,7 @@ export default function AdminPortal() {
             >
               <span>ESI-1</span>
               <span className="w-3.5 h-3.5 rounded-full bg-red-600/60 text-white text-[9px] flex items-center justify-center">
-                2
+                {esiCounts.esi1}
               </span>
             </button>
             <button
@@ -691,7 +725,7 @@ export default function AdminPortal() {
             >
               <span>ESI-2</span>
               <span className="w-3.5 h-3.5 rounded-full bg-orange-600/60 text-white text-[9px] flex items-center justify-center">
-                3
+                {esiCounts.esi2}
               </span>
             </button>
             <button
@@ -704,7 +738,7 @@ export default function AdminPortal() {
             >
               <span>ESI-3</span>
               <span className="w-3.5 h-3.5 rounded-full bg-blue-600/60 text-white text-[9px] flex items-center justify-center">
-                4
+                {esiCounts.esi3}
               </span>
             </button>
             <button
@@ -717,7 +751,7 @@ export default function AdminPortal() {
             >
               <span>ESI-4+</span>
               <span className="w-3.5 h-3.5 rounded-full bg-emerald-600/60 text-white text-[9px] flex items-center justify-center">
-                3
+                {esiCounts.esi4}
               </span>
             </button>
           </div>
@@ -1051,6 +1085,94 @@ export default function AdminPortal() {
                     <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
                       <div className="text-white/40 text-[10px]">High-Volume Corridors</div>
                       <div className="text-cyan-300 font-bold text-sm">Western Express Highway</div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── SELECTED INCIDENT INSPECTION DRAWER ── */}
+          <AnimatePresence>
+            {selectedIncident && (
+              <motion.div
+                initial={{ opacity: 0, y: 100 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 100 }}
+                className="absolute bottom-4 inset-x-6 z-30 p-5 rounded-2xl bg-[#090d18]/95 border border-cyan-500/40 shadow-[0_0_50px_rgba(0,0,0,0.95)] backdrop-blur-2xl text-left"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">🚨</span>
+                    <div>
+                      <div className="font-extrabold text-sm text-white flex items-center gap-2">
+                        <span>Incident #{selectedIncident.id}</span>
+                        <span
+                          className="px-2 py-0.5 rounded text-[10px] font-mono font-bold"
+                          style={{
+                            backgroundColor: `${selectedIncident.accentColor}33`,
+                            border: `1px solid ${selectedIncident.accentColor}88`,
+                            color: selectedIncident.accentColor,
+                          }}
+                        >
+                          ESI {selectedIncident.esi}
+                        </span>
+                        <span className="text-xs text-white/50">· {selectedIncident.title}</span>
+                      </div>
+                      <div className="text-[11px] text-white/50 font-mono mt-0.5">
+                        📍 {selectedIncident.location} · Time: {selectedIncident.time} · Status: {selectedIncident.status || 'ACTIVE'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        if (selectedIncident.mongoId) {
+                          await api.patch(`/incidents/${selectedIncident.mongoId}/status`, { status: 'COMPLETED' }).catch(() => {})
+                          toast.success(`Incident #${selectedIncident.id} resolved`)
+                          setIncidents((prev) => prev.filter((i) => i._id !== selectedIncident.mongoId))
+                          setSelectedIncident(null)
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500 text-emerald-300 text-xs font-bold font-mono transition-all"
+                    >
+                      Resolve Incident
+                    </button>
+                    <button
+                      onClick={() => setSelectedIncident(null)}
+                      className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs flex items-center justify-center transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
+                  <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10">
+                    <div className="text-white/40 text-[10px] uppercase font-semibold">MediAI Clinical Assessment</div>
+                    <div className="text-white mt-1 leading-relaxed font-sans font-medium text-xs">
+                      {selectedIncident.aiSummary || 'Patient prioritized for immediate emergency trauma team intake.'}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10">
+                    <div className="text-white/40 text-[10px] uppercase font-semibold">Assigned Unit</div>
+                    <div className="text-cyan-300 font-bold text-sm mt-1">
+                      🚑 {selectedIncident.assigned || 'MH-AMB-002'}
+                    </div>
+                    <div className="text-white/50 text-[10px] mt-0.5">
+                      Status: {selectedIncident.status || 'DISPATCHED'} · Priority Green Corridor Active
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10">
+                    <div className="text-white/40 text-[10px] uppercase font-semibold">Allocated Trauma Facility</div>
+                    <div className="text-purple-300 font-bold text-sm mt-1">
+                      🏥 {selectedIncident.allocatedHospital || 'Lilavati Hospital'}
+                    </div>
+                    <div className="text-white/50 text-[10px] mt-0.5">
+                      Trauma Bay 01 Standby Cleared
                     </div>
                   </div>
                 </div>

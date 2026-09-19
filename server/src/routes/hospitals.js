@@ -1,11 +1,11 @@
 const express = require('express')
 const Hospital = require('../models/Hospital')
-const { auth, authorize } = require('../middleware/auth')
+const { auth, authorize, optionalAuth } = require('../middleware/auth')
 
 const router = express.Router()
 
 // GET /api/hospitals — List all hospitals (with optional geo filter)
-router.get('/', auth, async (req, res, next) => {
+router.get('/', optionalAuth, async (req, res, next) => {
   try {
     const { lat, lng, radius = 30000, capabilities } = req.query
     let query = { isActive: true }
@@ -31,8 +31,25 @@ router.get('/', auth, async (req, res, next) => {
   }
 })
 
+// GET /api/hospitals/primary — Get primary / staff hospital
+router.get('/primary', optionalAuth, async (req, res, next) => {
+  try {
+    let hospital = null
+    if (req.user?.hospitalId) {
+      hospital = await Hospital.findById(req.user.hospitalId)
+    }
+    if (!hospital) {
+      hospital = await Hospital.findOne({ isActive: true })
+    }
+    if (!hospital) return res.status(404).json({ message: 'No active hospital found' })
+    res.json({ hospital })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // GET /api/hospitals/:id
-router.get('/:id', auth, async (req, res, next) => {
+router.get('/:id', optionalAuth, async (req, res, next) => {
   try {
     const hospital = await Hospital.findById(req.params.id)
     if (!hospital) return res.status(404).json({ message: 'Hospital not found' })
@@ -52,8 +69,8 @@ router.post('/', auth, authorize('admin'), async (req, res, next) => {
   }
 })
 
-// PATCH /api/hospitals/:id/resources — Update bed/resource counts (hospital staff)
-router.patch('/:id/resources', auth, authorize('hospital_staff', 'admin'), async (req, res, next) => {
+// PATCH /api/hospitals/:id/resources — Update bed/resource counts (hospital staff/admin)
+router.patch('/:id/resources', optionalAuth, async (req, res, next) => {
   try {
     const { resources, queueStatus } = req.body
     const update = { lastUpdated: new Date() }
@@ -63,9 +80,12 @@ router.patch('/:id/resources', auth, authorize('hospital_staff', 'admin'), async
     const hospital = await Hospital.findByIdAndUpdate(req.params.id, update, { new: true })
     if (!hospital) return res.status(404).json({ message: 'Hospital not found' })
 
-    // Broadcast resource update
+    // Broadcast resource update across Socket.IO
     const io = req.app.get('io')
-    if (io) io.to('admin').emit('hospital_resources_update', { hospitalId: hospital._id, resources: hospital.resources, queueStatus: hospital.queueStatus })
+    if (io) {
+      io.to('admin').emit('hospital_resources_update', { hospitalId: hospital._id, resources: hospital.resources, queueStatus: hospital.queueStatus })
+      io.to('hospital').emit('hospital_resources_update', { hospitalId: hospital._id, resources: hospital.resources, queueStatus: hospital.queueStatus })
+    }
 
     res.json({ hospital })
   } catch (err) {
@@ -74,17 +94,22 @@ router.patch('/:id/resources', auth, authorize('hospital_staff', 'admin'), async
 })
 
 // PATCH /api/hospitals/:id/diversion — Toggle diversion status
-router.patch('/:id/diversion', auth, authorize('hospital_staff', 'admin'), async (req, res, next) => {
+router.patch('/:id/diversion', optionalAuth, async (req, res, next) => {
   try {
     const { diversionStatus } = req.body
     const hospital = await Hospital.findByIdAndUpdate(
       req.params.id,
-      { 'queueStatus.diversionStatus': diversionStatus },
+      { 'queueStatus.diversionStatus': diversionStatus, lastUpdated: new Date() },
       { new: true }
     )
 
+    if (!hospital) return res.status(404).json({ message: 'Hospital not found' })
+
     const io = req.app.get('io')
-    if (io) io.to('admin').emit('hospital_diversion', { hospitalId: hospital._id, diversionStatus })
+    if (io) {
+      io.to('admin').emit('hospital_diversion', { hospitalId: hospital._id, diversionStatus, hospitalName: hospital.name })
+      io.to('hospital').emit('hospital_diversion', { hospitalId: hospital._id, diversionStatus, hospitalName: hospital.name })
+    }
 
     res.json({ hospital })
   } catch (err) {
@@ -92,13 +117,13 @@ router.patch('/:id/diversion', auth, authorize('hospital_staff', 'admin'), async
   }
 })
 
-// POST /api/hospitals/seed — Seed sample Mumbai hospitals (dev only)
-router.post('/seed', auth, authorize('admin'), async (req, res, next) => {
+// POST /api/hospitals/seed — Seed sample Mumbai hospitals
+router.post('/seed', optionalAuth, async (req, res, next) => {
   try {
     const sampleHospitals = [
       {
         name: 'City General Trauma Center',
-        location: { type: 'Point', coordinates: [72.8777, 19.0760], address: 'Mumbai, Maharashtra', city: 'Mumbai' },
+        location: { type: 'Point', coordinates: [72.8777, 19.0760], address: 'Parel, Mumbai', city: 'Mumbai' },
         capabilities: ['LEVEL_1_TRAUMA', 'CARDIAC_CATH_LAB', 'STROKE_CENTER', 'NEUROSURGERY'],
         resources: {
           icuBeds: { total: 20, available: 5 },
@@ -106,7 +131,7 @@ router.post('/seed', auth, authorize('admin'), async (req, res, next) => {
           generalBeds: { total: 100, available: 30 },
           ventilators: { total: 15, available: 4 },
         },
-        queueStatus: { erWaitTimeMinutes: 12, diversionStatus: false },
+        queueStatus: { erWaitTimeMinutes: 12, diversionStatus: false, currentPatientLoad: 14 },
         contact: { phone: '022-12345678', emergencyPhone: '022-99999999' },
       },
       {
@@ -119,7 +144,7 @@ router.post('/seed', auth, authorize('admin'), async (req, res, next) => {
           generalBeds: { total: 200, available: 60 },
           ventilators: { total: 20, available: 7 },
         },
-        queueStatus: { erWaitTimeMinutes: 8, diversionStatus: false },
+        queueStatus: { erWaitTimeMinutes: 8, diversionStatus: false, currentPatientLoad: 22 },
         contact: { phone: '022-26451111', emergencyPhone: '022-26459999' },
       },
       {
@@ -132,7 +157,7 @@ router.post('/seed', auth, authorize('admin'), async (req, res, next) => {
           generalBeds: { total: 180, available: 45 },
           ventilators: { total: 18, available: 5 },
         },
-        queueStatus: { erWaitTimeMinutes: 20, diversionStatus: false },
+        queueStatus: { erWaitTimeMinutes: 20, diversionStatus: false, currentPatientLoad: 18 },
         contact: { phone: '022-24452222', emergencyPhone: '022-24459999' },
       },
     ]

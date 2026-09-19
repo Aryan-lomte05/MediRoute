@@ -1,4 +1,5 @@
 # MediRoute — ChatGPT UI/UX Prompting System
+
 ## Structured Prompt Engineering for AI Image & UI Concept Generation
 
 > **How to Use:**
@@ -20,11 +21,13 @@ Visual Tone: Ultra-modern, professional mission-critical command interface. High
 ## 📄 Prompt 1: Public Landing Page & 3D Command Sphere
 
 ### Page Purpose & Functional Scope
+
 - **What this page is:** The primary entry point for citizens, emergency responders, and hospital partners. Serves both as a high-impact technological showcase and an instant emergency access portal.
 - **What it does:** Educates visitors on the multi-agent emergency response system, displays live city-wide emergency metrics, and provides instant routing to the 4 dedicated operational portals (Patient, Paramedic, Hospital, Admin).
 - **Extended capabilities:** Interactive 3D interactive city globe visualizing active emergency vectors, live system status ticker, 1-click emergency SOS redirect, and multimodal intake options (Web, WhatsApp, Voice IVR).
 
 ### 📋 Copy-Paste ChatGPT Prompt
+
 ```text
 Generate a full-page website UI design mockup for the landing page of "MediRoute", a next-generation intelligent emergency response platform.
 
@@ -46,14 +49,10 @@ Style: Dark mission-critical UI, deep obsidian background (#0a0a0f), crisp typog
 
 ---
 
-## 🗺️ Prompt 2: 3D City Operations Command Center (Admin & Dispatcher)
-
-### Page Purpose & Functional Scope
-- **What this page is:** The central nerve center used by metropolitan EMS dispatchers and emergency directors.
-- **What it does:** Visualizes real-time ambulance positions, hospital capacity, ongoing emergency incidents, and route simulations across the city map.
-- **Extended capabilities:** Multi-angle 3D camera controls (Isometric 55°, Horizon 75°, Tactical 2D 0°, 360° Orbit), one-click entity focus, live GPS telemetry breadcrumbs, traffic overlay, and fleet filter overlays (Available, En-Route, Diverted).
+## 🗺️ Prompt 2: B 
 
 ### 📋 Copy-Paste ChatGPT Prompt
+
 ```text
 Generate a high-density desktop dashboard UI mockup for the "City Operations Command Center" of MediRoute.
 
@@ -79,11 +78,13 @@ Style: Command and control room interface, high contrast dark theme, futuristic 
 ## 🚑 Prompt 3: Paramedic Field Response HUD & Mobile PWA
 
 ### Page Purpose & Functional Scope
+
 - **What this page is:** The tactical mobile/tablet interface mounted inside ambulances and carried by emergency medical technicians (EMTs).
 - **What it does:** Provides turn-by-turn navigation with live green-corridor traffic signals, real-time patient vitals logging, AI-suggested clinical stabilization protocols, and pre-arrival hospital transmission.
 - **Extended capabilities:** Voice-activated transcription via Whisper STT, automated ETA calculation based on real-time traffic, 1-tap ER notification, offline sync capability.
 
 ### 📋 Copy-Paste ChatGPT Prompt
+
 ```text
 Generate a mobile/tablet PWA interface UI mockup for the "Paramedic Emergency Field HUD" of MediRoute.
 
@@ -113,11 +114,13 @@ Style: High-contrast touch-friendly interface designed for vibrating vehicle cab
 ## 🏥 Prompt 4: Hospital Emergency Department Trauma Bay Monitor
 
 ### Page Purpose & Functional Scope
+
 - **What this page is:** The real-time triage intake screen mounted in hospital Emergency Departments (ED) and monitored by ER charge nurses and trauma surgeons.
 - **What it does:** Alerts staff to inbound ambulances, displays live incoming patient telemetry before arrival, manages ICU and emergency bed allocations, and toggles hospital diversion status.
 - **Extended capabilities:** Inbound ambulance radar countdown, pre-arrival preparation checklist (OR prep, blood crossmatch, radiology reserve), multi-patient queue management.
 
 ### 📋 Copy-Paste ChatGPT Prompt
+
 ```text
 Generate a widescreen desktop command dashboard UI mockup for the "Hospital Emergency Department Trauma Bay Monitor" of MediRoute.
 
@@ -146,11 +149,13 @@ Style: Clinical command center aesthetic, high information density, dark surgica
 ## 🆘 Prompt 5: Citizen Emergency SOS & Live Ambulance Tracker
 
 ### Page Purpose & Functional Scope
+
 - **What this page is:** The mobile web app / PWA interface used by a citizen reporting or experiencing an emergency.
 - **What it does:** Provides 1-tap emergency dispatch, automatically acquires GPS coordinates, conducts instant multi-channel AI triage, and displays the approaching ambulance with real-time ETA.
 - **Extended capabilities:** WhatsApp and Voice call integration, audio voice note recording, emergency contact SMS/Email broadcast, first-aid instructions while waiting.
 
 ### 📋 Copy-Paste ChatGPT Prompt
+
 ```text
 Generate a smartphone mobile UI mockup (iOS / Android) for the "Citizen Emergency SOS & Live Tracker" of MediRoute.
 
@@ -177,11 +182,13 @@ Style: High-urgency, calming yet responsive citizen-facing mobile UI, dark mode 
 ## 📊 Prompt 6: AI Surge Forecasting & Fleet Optimization Portal
 
 ### Page Purpose & Functional Scope
+
 - **What this page is:** The strategic predictive intelligence dashboard used by city healthcare administrators and EMS directors.
 - **What it does:** Predicts emergency surge patterns across city zones using time-series forecasting (TFT), analyzes historical accident hotspots, and recommends proactive ambulance staging.
 - **Extended capabilities:** Weather and event correlation, multi-objective allocation parameter tuning, ESI severity distribution analytics.
 
 ### 📋 Copy-Paste ChatGPT Prompt
+
 ```text
 Generate an executive analytics dashboard UI mockup for the "AI Surge Forecasting & Fleet Staging Engine" of MediRoute.
 
