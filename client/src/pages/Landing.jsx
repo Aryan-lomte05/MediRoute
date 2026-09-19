@@ -177,11 +177,48 @@ export default function Landing() {
         </div>
       </header>
 
-      {/* ── HERO SECTION ── */}
-      <section className="relative pt-12 pb-16 px-6 max-w-[1400px] mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
-          {/* Left Column: Typography & CTAs */}
-          <div className="lg:col-span-6 space-y-6 z-10">
+      {/* ── HERO SECTION (Full-bleed seamless gradient flow) ── */}
+      <section className="relative min-h-[580px] lg:min-h-[660px] xl:min-h-[720px] flex items-center overflow-hidden">
+        {/* Full-bleed City Background Canvas (Seamlessly emerges from left & bottom gradients) */}
+        <div className="absolute top-0 right-0 w-full lg:w-[68%] xl:w-[65%] h-full pointer-events-none select-none z-0">
+          <img
+            src="/hero-city.jpg"
+            alt="MediRoute Dynamic City GIS Grid"
+            className="w-full h-full object-cover object-[center_35%]"
+          />
+          {/* Smooth Left Gradient Fade: transitions from pure #06070a into city visual */}
+          <div className="absolute inset-y-0 left-0 w-full md:w-3/5 lg:w-1/2 bg-gradient-to-r from-[#06070a] via-[#06070a]/90 to-transparent" />
+          {/* Top Gradient Fade */}
+          <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-[#06070a] to-transparent" />
+          {/* Bottom Gradient Fade into Metrics row */}
+          <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[#06070a] via-[#06070a]/80 to-transparent" />
+          {/* Right Edge Fade */}
+          <div className="absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-[#06070a]/60 to-transparent" />
+        </div>
+
+        {/* Minimal HUD telemetry overlays matching exact image */}
+        <div className="absolute top-[36%] left-[53%] hidden xl:flex flex-col items-start z-10 pointer-events-none">
+          <div className="px-2.5 py-1 rounded bg-[#090a12]/85 border border-red-500/40 text-[10px] font-mono shadow-[0_0_15px_rgba(255,45,74,0.3)] backdrop-blur-sm">
+            <div className="text-red-400 font-semibold text-[9px] leading-none">Patient</div>
+            <div className="text-white/70 text-[8px] mt-0.5 leading-none">AI Triage: <span className="text-white font-bold">ESI 1</span></div>
+          </div>
+        </div>
+
+        <div className="absolute top-[18%] right-[8%] hidden xl:flex flex-col items-start z-10 pointer-events-none">
+          <div className="px-3 py-1.5 rounded bg-[#090a12]/85 border border-cyan-500/40 text-[10px] font-mono shadow-[0_0_15px_rgba(0,245,255,0.3)] backdrop-blur-sm">
+            <div className="text-cyan-300 font-semibold text-[9px] leading-none">Trauma Center</div>
+            <div className="text-white/70 text-[8px] mt-0.5 leading-none">ETA 6 min · <span className="text-cyan-400 font-bold">Bed Reserved</span></div>
+          </div>
+        </div>
+
+        <div className="absolute bottom-10 right-10 hidden lg:block z-10 text-right pointer-events-none">
+          <div className="text-[10px] font-mono tracking-[0.28em] text-white/35 uppercase font-semibold">SMART CITIES</div>
+          <div className="text-[10px] font-mono tracking-[0.28em] text-white/35 uppercase font-semibold">SAFER PEOPLE</div>
+        </div>
+
+        {/* Hero Content (Left Column, sits on clean dark background) */}
+        <div className="max-w-[1400px] mx-auto px-6 w-full relative z-10 py-14 lg:py-20">
+          <div className="max-w-xl lg:max-w-2xl space-y-6">
             <div className="text-[11px] font-mono tracking-[0.25em] text-white/50 uppercase font-semibold">
               FASTER RESPONSE. BRIGHTER TOMORROWS.
             </div>
@@ -194,7 +231,7 @@ export default function Landing() {
               </span>
             </h1>
 
-            <p className="text-white/60 text-sm sm:text-base leading-relaxed max-w-lg">
+            <p className="text-white/65 text-sm sm:text-base leading-relaxed max-w-lg">
               MediRoute leverages multi-agent AI, real-time traffic intelligence and dynamic hospital allocation to deliver the right care, to the right patient, at the right time.
             </p>
 
@@ -233,103 +270,94 @@ export default function Landing() {
               </button>
             </div>
           </div>
-
-          {/* Right Column: Exact 3D City Night Scene Visualizer */}
-          <div className="lg:col-span-6 relative">
-            <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-[#08090e] shadow-[0_0_60px_rgba(0,0,0,0.9)]">
-              {/* City illustration asset */}
-              <img
-                src="/hero-city.jpg"
-                alt="MediRoute Dynamic City GIS Grid"
-                className="w-full h-auto object-cover opacity-95 select-none"
-              />
-
-              {/* Overlay vignette */}
-              <div className="absolute inset-0 bg-gradient-to-r from-[#06070a]/80 via-transparent to-transparent pointer-events-none" />
-
-              {/* Floating Badge 1: Patient Pin */}
-              <div className="absolute top-[28%] left-[28%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                <div className="px-3 py-1.5 rounded-md bg-[#0a0a14]/90 border border-red-500/40 text-[10px] font-mono text-center shadow-xl backdrop-blur-md">
-                  <div className="text-red-400 font-bold">Patient</div>
-                  <div className="text-white/70 text-[9px]">AI Triage: <strong className="text-white">ESI 1</strong></div>
-                </div>
-              </div>
-
-              {/* Floating Badge 2: Trauma Center Pin */}
-              <div className="absolute top-[18%] right-[8%] flex flex-col items-center">
-                <div className="px-3.5 py-2 rounded-md bg-[#0a0a14]/90 border border-cyan-500/40 text-[10px] font-mono text-center shadow-xl backdrop-blur-md">
-                  <div className="text-cyan-300 font-bold">Trauma Center</div>
-                  <div className="text-white/70 text-[9px]">ETA 6 min · <strong className="text-cyan-400">Bed Reserved</strong></div>
-                </div>
-              </div>
-
-              {/* Bottom Right Tag */}
-              <div className="absolute bottom-3 right-4 text-[9px] font-mono tracking-[0.25em] text-white/40 uppercase font-semibold">
-                SMART CITIES · SAFER PEOPLE
-              </div>
-            </div>
-          </div>
         </div>
+      </section>
 
-        {/* ── METRICS STRIP (Matches Image 1 bottom) ── */}
-        <div className="mt-14 rounded-xl border border-white/[0.08] bg-[#090a10] p-6 grid grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Card 1 */}
-          <div className="border-r border-white/[0.06] last:border-0 pr-4">
-            <div className="flex items-center gap-2 text-white/40 text-[11px] font-mono uppercase tracking-wider mb-1">
-              <span>⏱</span>
-              <span>AVERAGE RESPONSE TIME</span>
+      {/* ── METRICS STRIP (Unboxed, open horizontal telemetry row matching exact mockup) ── */}
+      <section className="max-w-[1400px] mx-auto px-6">
+        <div className="py-6 border-t border-b border-white/[0.07] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Metric 1: Average Response Time */}
+          <div className="flex items-center gap-4 lg:border-r border-white/[0.07] lg:pr-6">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center text-cyan-400 shrink-0">
+              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <circle cx="12" cy="13" r="8" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4l2.5 2.5M10 2h4M12 2v3" />
+              </svg>
             </div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-              4.2 min
-            </div>
-            <div className="text-xs font-mono text-emerald-400 mt-1 flex items-center gap-1">
-              <span>↓ 28%</span>
-              <span className="text-white/40">vs. city average</span>
+            <div>
+              <div className="text-white/40 text-[10px] font-mono uppercase tracking-wider">
+                AVERAGE RESPONSE TIME
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-tight">
+                4.2 min
+              </div>
+              <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                <span>↓ 28%</span>
+                <span className="text-white/40">vs. city average</span>
+              </div>
             </div>
           </div>
 
-          {/* Card 2 */}
-          <div className="border-r border-white/[0.06] last:border-0 pr-4">
-            <div className="flex items-center gap-2 text-white/40 text-[11px] font-mono uppercase tracking-wider mb-1">
-              <span>🛣</span>
-              <span>ACTIVE GREEN CORRIDORS</span>
+          {/* Metric 2: Active Green Corridors */}
+          <div className="flex items-center gap-4 lg:border-r border-white/[0.07] lg:pr-6">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center text-cyan-400 shrink-0">
+              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 19L9 5m6 0l5 14M12 7v2m0 4v2m0 4v2" />
+              </svg>
             </div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-              14
-            </div>
-            <div className="text-xs font-mono text-emerald-400 mt-1 flex items-center gap-1">
-              <span>↑ Live</span>
-              <span className="text-white/40">across Mumbai</span>
-            </div>
-          </div>
-
-          {/* Card 3 */}
-          <div className="border-r border-white/[0.06] last:border-0 pr-4">
-            <div className="flex items-center gap-2 text-white/40 text-[11px] font-mono uppercase tracking-wider mb-1">
-              <span>🏥</span>
-              <span>PARTICIPATING TRAUMA CENTERS</span>
-            </div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-              38
-            </div>
-            <div className="text-xs font-mono text-emerald-400 mt-1 flex items-center gap-1">
-              <span>↑ 100%</span>
-              <span className="text-white/40">real-time bed sync</span>
+            <div>
+              <div className="text-white/40 text-[10px] font-mono uppercase tracking-wider">
+                ACTIVE GREEN CORRIDORS
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-tight">
+                14
+              </div>
+              <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                <span>↑ Live</span>
+                <span className="text-white/40">across Mumbai</span>
+              </div>
             </div>
           </div>
 
-          {/* Card 4 */}
-          <div>
-            <div className="flex items-center gap-2 text-white/40 text-[11px] font-mono uppercase tracking-wider mb-1">
-              <span>🧠</span>
-              <span>AI TRIAGE ACCURACY</span>
+          {/* Metric 3: Participating Trauma Centers */}
+          <div className="flex items-center gap-4 lg:border-r border-white/[0.07] lg:pr-6">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center text-cyan-400 shrink-0">
+              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
             </div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-              99.4%
+            <div>
+              <div className="text-white/40 text-[10px] font-mono uppercase tracking-wider">
+                PARTICIPATING TRAUMA CENTERS
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-tight">
+                38
+              </div>
+              <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                <span>↑ 100%</span>
+                <span className="text-white/40">real-time bed sync</span>
+              </div>
             </div>
-            <div className="text-xs font-mono text-emerald-400 mt-1 flex items-center gap-1">
-              <span>↑ 0.3%</span>
-              <span className="text-white/40">validated on 50K+ cases</span>
+          </div>
+
+          {/* Metric 4: AI Triage Accuracy */}
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center text-cyan-400 shrink-0">
+              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+            </div>
+            <div>
+              <div className="text-white/40 text-[10px] font-mono uppercase tracking-wider">
+                AI TRIAGE ACCURACY
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-tight">
+                99.4%
+              </div>
+              <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                <span>↑ 0.3%</span>
+                <span className="text-white/40">validated on 50K+ cases</span>
+              </div>
             </div>
           </div>
         </div>
