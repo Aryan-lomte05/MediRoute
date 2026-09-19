@@ -1,772 +1,615 @@
-import { useRef, useEffect, useState, Suspense } from 'react'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { OrbitControls, Stars, Sphere, MeshDistortMaterial, Float, Text3D, Center } from '@react-three/drei'
-import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion'
+import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import * as THREE from 'three'
-import gsap from 'gsap'
-import { ScrollTrigger } from 'gsap/ScrollTrigger'
 
-gsap.registerPlugin(ScrollTrigger)
-
-// ─── 3D Earth Globe ───────────────────────────────────────────────────────────
-function EarthGlobe() {
-  const meshRef = useRef()
-  const atmosphereRef = useRef()
-  const glowRef = useRef()
-
-  useFrame(({ clock }) => {
-    if (meshRef.current) meshRef.current.rotation.y = clock.elapsedTime * 0.08
-    if (atmosphereRef.current) atmosphereRef.current.rotation.y = clock.elapsedTime * 0.06
-  })
-
-  return (
-    <group>
-      {/* Core globe */}
-      <mesh ref={meshRef}>
-        <sphereGeometry args={[2.2, 64, 64]} />
-        <meshPhongMaterial
-          color="#0a1628"
-          emissive="#051020"
-          specular="#00F5FF"
-          shininess={60}
-          wireframe={false}
-        />
-      </mesh>
-
-      {/* Wireframe overlay */}
-      <mesh ref={atmosphereRef} scale={1.001}>
-        <sphereGeometry args={[2.2, 32, 32]} />
-        <meshBasicMaterial
-          color="#00F5FF"
-          wireframe={true}
-          transparent
-          opacity={0.06}
-        />
-      </mesh>
-
-      {/* Atmosphere glow */}
-      <mesh ref={glowRef} scale={1.15}>
-        <sphereGeometry args={[2.2, 32, 32]} />
-        <meshBasicMaterial
-          color="#FF2D4A"
-          transparent
-          opacity={0.03}
-          side={THREE.BackSide}
-        />
-      </mesh>
-
-      {/* Outer atmosphere */}
-      <mesh scale={1.25}>
-        <sphereGeometry args={[2.2, 32, 32]} />
-        <meshBasicMaterial
-          color="#1a0a2e"
-          transparent
-          opacity={0.08}
-          side={THREE.BackSide}
-        />
-      </mesh>
-
-      {/* Incident markers */}
-      <IncidentMarker position={[1.8, 0.8, 1.2]} color="#FF2D4A" />
-      <IncidentMarker position={[-1.5, 0.3, 1.7]} color="#FF8C00" delay={0.5} />
-      <IncidentMarker position={[0.5, 1.9, 0.8]} color="#FF2D4A" delay={1} />
-      <IncidentMarker position={[-0.8, -1.5, 1.6]} color="#00F5FF" delay={1.5} />
-      <IncidentMarker position={[2.0, -0.4, 0.7]} color="#FF2D4A" delay={0.8} />
-      <IncidentMarker position={[-1.9, 1.0, 0.5]} color="#7C3AED" delay={0.3} />
-
-      {/* Route arcs */}
-      <RouteArc
-        start={[1.8, 0.8, 1.2]}
-        end={[-1.5, 0.3, 1.7]}
-        color="#FF2D4A"
-      />
-      <RouteArc
-        start={[0.5, 1.9, 0.8]}
-        end={[2.0, -0.4, 0.7]}
-        color="#00F5FF"
-        delay={1}
-      />
-    </group>
-  )
-}
-
-function IncidentMarker({ position, color, delay = 0 }) {
-  const ringRef = useRef()
-  const dotRef = useRef()
-
-  useFrame(({ clock }) => {
-    const t = (clock.elapsedTime + delay) % 2
-    if (ringRef.current) {
-      const scale = 1 + t * 1.5
-      ringRef.current.scale.setScalar(scale)
-      ringRef.current.material.opacity = Math.max(0, 0.8 - t * 0.4)
-    }
-    if (dotRef.current) {
-      dotRef.current.material.emissiveIntensity = 0.8 + Math.sin(clock.elapsedTime * 3 + delay) * 0.4
-    }
-  })
-
-  return (
-    <group position={position}>
-      {/* Pulsing ring */}
-      <mesh ref={ringRef}>
-        <ringGeometry args={[0.06, 0.09, 16]} />
-        <meshBasicMaterial color={color} transparent opacity={0.8} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Core dot */}
-      <mesh ref={dotRef}>
-        <sphereGeometry args={[0.04, 8, 8]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1} />
-      </mesh>
-    </group>
-  )
-}
-
-function RouteArc({ start, end, color, delay = 0 }) {
-  const lineRef = useRef()
-  const progressRef = useRef(0)
-
-  const points = []
-  const startVec = new THREE.Vector3(...start)
-  const endVec = new THREE.Vector3(...end)
-  const midVec = new THREE.Vector3()
-    .addVectors(startVec, endVec)
-    .multiplyScalar(0.5)
-    .normalize()
-    .multiplyScalar(startVec.length() * 1.4)
-
-  for (let i = 0; i <= 40; i++) {
-    const t = i / 40
-    const point = new THREE.Vector3()
-    point.x = (1 - t) ** 2 * startVec.x + 2 * (1 - t) * t * midVec.x + t ** 2 * endVec.x
-    point.y = (1 - t) ** 2 * startVec.y + 2 * (1 - t) * t * midVec.y + t ** 2 * endVec.y
-    point.z = (1 - t) ** 2 * startVec.z + 2 * (1 - t) * t * midVec.z + t ** 2 * endVec.z
-    points.push(point)
-  }
-
-  const geometry = new THREE.BufferGeometry().setFromPoints(points)
-
-  useFrame(({ clock }) => {
-    progressRef.current = ((clock.elapsedTime + delay) % 4) / 4
-    if (lineRef.current) {
-      lineRef.current.material.dashOffset = -progressRef.current * 2
-    }
-  })
-
-  return (
-    <line ref={lineRef} geometry={geometry}>
-      <lineDashedMaterial
-        color={color}
-        dashSize={0.15}
-        gapSize={0.08}
-        linewidth={1}
-        transparent
-        opacity={0.7}
-      />
-    </line>
-  )
-}
-
-// ─── Floating Particles ────────────────────────────────────────────────────────
-function ParticleField() {
-  const points = useRef()
-  const count = 2000
-
-  const positions = new Float32Array(count * 3)
-  for (let i = 0; i < count; i++) {
-    positions[i * 3] = (Math.random() - 0.5) * 20
-    positions[i * 3 + 1] = (Math.random() - 0.5) * 20
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 20
-  }
-
-  useFrame(({ clock }) => {
-    if (points.current) {
-      points.current.rotation.y = clock.elapsedTime * 0.02
-      points.current.rotation.x = clock.elapsedTime * 0.01
-    }
-  })
-
-  return (
-    <points ref={points}>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          array={positions}
-          count={count}
-          itemSize={3}
-        />
-      </bufferGeometry>
-      <pointsMaterial size={0.025} color="#00F5FF" transparent opacity={0.4} sizeAttenuation />
-    </points>
-  )
-}
-
-// ─── Ambient Ring ──────────────────────────────────────────────────────────────
-function OrbitRing({ radius, color, speed, tilt = 0 }) {
-  const ref = useRef()
-  useFrame(({ clock }) => {
-    if (ref.current) ref.current.rotation.z = clock.elapsedTime * speed
-  })
-  return (
-    <mesh ref={ref} rotation={[tilt, 0, 0]}>
-      <torusGeometry args={[radius, 0.003, 16, 100]} />
-      <meshBasicMaterial color={color} transparent opacity={0.3} />
-    </mesh>
-  )
-}
-
-// ─── Scene ─────────────────────────────────────────────────────────────────────
-function Scene() {
-  return (
-    <>
-      <ambientLight intensity={0.2} />
-      <pointLight position={[5, 5, 5]} intensity={1.5} color="#FF2D4A" />
-      <pointLight position={[-5, -3, -5]} intensity={0.8} color="#00F5FF" />
-      <pointLight position={[0, 8, 0]} intensity={0.5} color="#7C3AED" />
-      <Stars radius={80} depth={50} count={6000} factor={4} saturation={0} fade speed={0.5} />
-      <ParticleField />
-      <EarthGlobe />
-      <OrbitRing radius={3.2} color="#FF2D4A" speed={0.15} tilt={Math.PI / 6} />
-      <OrbitRing radius={3.6} color="#00F5FF" speed={-0.1} tilt={Math.PI / 3} />
-      <OrbitRing radius={4.0} color="#7C3AED" speed={0.08} tilt={Math.PI / 2} />
-      <OrbitControls
-        enableZoom={false}
-        enablePan={false}
-        autoRotate
-        autoRotateSpeed={0.4}
-        minPolarAngle={Math.PI / 3}
-        maxPolarAngle={Math.PI / 1.5}
-      />
-    </>
-  )
-}
-
-// ─── Stats Counter ─────────────────────────────────────────────────────────────
-function AnimatedCounter({ target, label, suffix = '' }) {
-  const [count, setCount] = useState(0)
-  const ref = useRef()
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        let start = 0
-        const duration = 2000
-        const step = (timestamp) => {
-          if (!start) start = timestamp
-          const progress = Math.min((timestamp - start) / duration, 1)
-          setCount(Math.floor(progress * target))
-          if (progress < 1) requestAnimationFrame(step)
-        }
-        requestAnimationFrame(step)
-        observer.disconnect()
-      }
-    })
-    if (ref.current) observer.observe(ref.current)
-    return () => observer.disconnect()
-  }, [target])
-
-  return (
-    <div ref={ref} className="text-center">
-      <div className="font-display text-5xl font-bold gradient-text-emergency">
-        {count.toLocaleString()}{suffix}
-      </div>
-      <div className="text-white/50 mt-1 text-sm font-medium">{label}</div>
-    </div>
-  )
-}
-
-// ─── Feature Card ──────────────────────────────────────────────────────────────
-function FeatureCard({ icon, title, desc, accent, delay }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 40 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay }}
-      viewport={{ once: true }}
-      whileHover={{ scale: 1.03, y: -4 }}
-      className="glass-card p-6 relative overflow-hidden group cursor-default"
-    >
-      <div
-        className="absolute top-0 left-0 right-0 h-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-        style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }}
-      />
-      <div
-        className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl mb-4"
-        style={{ background: `${accent}22`, border: `1px solid ${accent}44` }}
-      >
-        {icon}
-      </div>
-      <h3 className="font-display font-semibold text-lg text-white mb-2">{title}</h3>
-      <p className="text-white/50 text-sm leading-relaxed">{desc}</p>
-    </motion.div>
-  )
-}
-
-// ─── Workflow Step ─────────────────────────────────────────────────────────────
-function WorkflowStep({ step, title, desc, active }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      whileInView={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.5, delay: step * 0.1 }}
-      viewport={{ once: true }}
-      className={`flex gap-4 p-4 rounded-xl transition-all duration-300 ${
-        active ? 'bg-emergency/10 border border-emergency/30' : 'hover:bg-white/[0.02]'
-      }`}
-    >
-      <div
-        className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 font-mono ${
-          active ? 'bg-emergency text-white glow-red' : 'bg-surface-elevated text-white/40 border border-surface-border'
-        }`}
-      >
-        {String(step).padStart(2, '0')}
-      </div>
-      <div>
-        <div className={`font-semibold ${active ? 'text-emergency' : 'text-white'}`}>{title}</div>
-        <div className="text-white/40 text-sm mt-0.5">{desc}</div>
-      </div>
-    </motion.div>
-  )
-}
-
-// ─── Portal Card ───────────────────────────────────────────────────────────────
-function PortalCard({ title, role, desc, color, icon, features, path }) {
-  const navigate = useNavigate()
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 50 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.7 }}
-      viewport={{ once: true }}
-      whileHover={{ y: -8 }}
-      className="glass-card p-8 relative overflow-hidden group cursor-pointer flex flex-col"
-      onClick={() => navigate(path)}
-    >
-      <div
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-        style={{ background: `radial-gradient(circle at top left, ${color}08, transparent 60%)` }}
-      />
-      <div
-        className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mb-6"
-        style={{ background: `${color}15`, border: `1px solid ${color}30` }}
-      >
-        {icon}
-      </div>
-      <div className="text-xs font-mono uppercase tracking-widest mb-2" style={{ color }}>
-        {role}
-      </div>
-      <h3 className="font-display text-2xl font-bold text-white mb-3">{title}</h3>
-      <p className="text-white/50 text-sm leading-relaxed mb-6">{desc}</p>
-      <ul className="space-y-2 flex-1">
-        {features.map((f, i) => (
-          <li key={i} className="flex items-center gap-2 text-sm text-white/60">
-            <span style={{ color }} className="text-xs">▸</span> {f}
-          </li>
-        ))}
-      </ul>
-      <button
-        className="mt-6 w-full py-3 rounded-xl font-semibold text-sm transition-all duration-300"
-        style={{
-          background: `${color}15`,
-          border: `1px solid ${color}30`,
-          color,
-        }}
-        onMouseEnter={(e) => {
-          e.target.style.background = `${color}25`
-          e.target.style.boxShadow = `0 0 20px ${color}40`
-        }}
-        onMouseLeave={(e) => {
-          e.target.style.background = `${color}15`
-          e.target.style.boxShadow = 'none'
-        }}
-      >
-        Enter Portal →
-      </button>
-    </motion.div>
-  )
-}
-
-// ─── Main Landing Page ─────────────────────────────────────────────────────────
 export default function Landing() {
   const navigate = useNavigate()
-  const heroRef = useRef()
-  const { scrollY } = useScroll()
-  const globeY = useTransform(scrollY, [0, 600], [0, 100])
-  const globeOpacity = useTransform(scrollY, [0, 400], [1, 0.3])
+  const [videoModalOpen, setVideoModalOpen] = useState(false)
 
-  const features = [
+  const portalCards = [
     {
-      icon: '🎙️',
-      title: 'AI Voice Triage',
-      desc: 'Real-time speech-to-text with LLM-powered Emergency Severity Index scoring within 3 seconds.',
-      accent: '#FF2D4A',
-    },
-    {
-      icon: '🧮',
-      title: 'MILP Allocation Engine',
-      desc: 'Multi-objective optimization matching patients to the best hospital using OR-Tools.',
-      accent: '#00F5FF',
-    },
-    {
-      icon: '🗺️',
-      title: 'Dynamic Green Corridor',
-      desc: 'AI-predicted traffic congestion with real-time route recalculation via OSRM.',
-      accent: '#7C3AED',
-    },
-    {
-      icon: '📡',
-      title: 'Live GPS Tracking',
-      desc: 'Sub-2-second ambulance location updates streamed via WebSocket to all portals.',
-      accent: '#FF8C00',
-    },
-    {
-      icon: '🏥',
-      title: 'Zero-Wait ER Handover',
-      desc: 'Pre-reserves ICU beds and alerts trauma teams before ambulance arrival.',
-      accent: '#00C851',
-    },
-    {
-      icon: '📊',
-      title: 'Surge Forecasting',
-      desc: 'Temporal Fusion Transformer predicts hospital capacity demand 6–24 hours ahead.',
-      accent: '#FF2D4A',
-    },
-  ]
-
-  const portals = [
-    {
-      title: 'Patient Portal',
-      role: 'Emergency SOS',
-      desc: 'One-tap emergency request with real-time ambulance tracking and ETA countdown.',
-      color: '#FF2D4A',
-      icon: '🆘',
+      num: '01',
+      role: 'Citizen',
+      subrole: 'Emergency SOS',
+      desc: 'Instant geolocation lock, AI voice triage and live ambulance tracking.',
+      tag: 'ANYONE ANYWHERE',
+      image: '/card-citizen.jpg',
       path: '/patient',
-      features: ['1-tap SOS trigger', 'Live ambulance tracker', 'ETA countdown', 'Emergency ID profile'],
+      accentColor: '#FF2D4A',
+      icon: (
+        <svg className="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+        </svg>
+      ),
     },
     {
-      title: 'Paramedic PWA',
-      role: 'Field Operations',
-      desc: 'Turn-by-turn navigation with AI-suggested routes and live patient vitals dashboard.',
-      color: '#00F5FF',
-      icon: '🚑',
+      num: '02',
+      role: 'Paramedic',
+      subrole: 'Field HUD',
+      desc: 'Real-time dispatch, turn-by-turn navigation and patient vitals stream.',
+      tag: 'FASTER ON GROUND',
+      image: '/card-paramedic.jpg',
       path: '/paramedic',
-      features: ['Turn-by-turn nav', 'Vitals entry form', 'Dynamic re-routing', 'Incident status updates'],
+      accentColor: '#00F5FF',
+      icon: (
+        <svg className="w-5 h-5 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 16v3m-2-1.5h4M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v4H9V9z" />
+        </svg>
+      ),
     },
     {
-      title: 'Hospital Command',
-      role: 'ER Management',
-      desc: 'Real-time incoming patient feed with auto bed reservation and one-click pre-accept.',
-      color: '#7C3AED',
-      icon: '🏥',
+      num: '03',
+      role: 'Hospital',
+      subrole: 'Emergency Room',
+      desc: 'Dynamic bed allocation, inbound alerts and zero-wait trauma intake.',
+      tag: 'PREPARE BEFORE THEY ARRIVE',
+      image: '/card-hospital.jpg',
       path: '/hospital',
-      features: ['Live patient feed', 'Auto bed reservation', 'Resource management', 'Diversion control'],
+      accentColor: '#10B981',
+      icon: (
+        <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+        </svg>
+      ),
     },
     {
-      title: 'Admin Analytics',
-      role: 'Operations Center',
-      desc: 'City-wide emergency heatmaps, fleet utilization, and AI allocation override controls.',
-      color: '#FF8C00',
-      icon: '📊',
+      num: '04',
+      role: 'City Command',
+      subrole: 'Dispatcher',
+      desc: 'City-wide GIS map, AI fleet allocation and real-time incident management.',
+      tag: 'A SMARTER SAFER CITY',
+      image: '/card-command.jpg',
       path: '/admin',
-      features: ['City heatmaps', 'Fleet utilization', 'Surge forecasting', 'AI overrides'],
+      accentColor: '#8B5CF6',
+      icon: (
+        <svg className="w-5 h-5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+      ),
     },
   ]
 
-  const workflow = [
-    { title: 'SOS Triggered', desc: 'Patient triggers emergency via app or voice call' },
-    { title: 'AI Voice Triage', desc: 'LLM classifies acuity (ESI 1–5) within 3 seconds' },
-    { title: 'Nearest Ambulance Dispatched', desc: 'Geospatial query finds optimal unit' },
-    { title: 'MILP Hospital Allocation', desc: 'AI ranks hospitals by ETA, capacity, specialty' },
-    { title: 'Green Corridor Activated', desc: 'AI-optimized route avoids congestion' },
-    { title: 'Zero-Wait ER Handover', desc: 'Bed pre-reserved, trauma team pre-alerted' },
+  const workflowItems = [
+    {
+      step: '01',
+      title: 'Emergency Detection',
+      desc: '1-tap SOS or automatic incident detection.',
+      color: '#FF2D4A',
+      icon: (
+        <svg className="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+        </svg>
+      ),
+    },
+    {
+      step: '02',
+      title: 'AI Triage Classification',
+      desc: 'Analyze symptoms and assign ESI 1–5 within seconds.',
+      color: '#3B82F6',
+      icon: (
+        <svg className="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
+      ),
+    },
+    {
+      step: '03',
+      title: 'Dynamic Hospital Matching',
+      desc: 'MILP algorithm selects the optimal hospital based on ETA, capacity and specialty.',
+      color: '#10B981',
+      icon: (
+        <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+        </svg>
+      ),
+    },
+    {
+      step: '04',
+      title: 'Green-Corridor Dispatch',
+      desc: 'Real-time traffic-synced routing with priority clearance.',
+      color: '#8B5CF6',
+      icon: (
+        <svg className="w-5 h-5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+        </svg>
+      ),
+    },
+    {
+      step: '05',
+      title: 'Definitive Care',
+      desc: 'Patient handover with pre-reserved resources and clinical readiness.',
+      color: '#00F5FF',
+      icon: (
+        <svg className="w-5 h-5 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+        </svg>
+      ),
+    },
   ]
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] overflow-x-hidden">
-      {/* ── Navbar ── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 px-6 py-4 flex items-center justify-between">
-        <div
-          className="absolute inset-0 -z-10 backdrop-blur-xl"
-          style={{ background: 'linear-gradient(180deg, rgba(10,10,15,0.95) 0%, transparent 100%)' }}
-        />
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-emergency rounded-lg flex items-center justify-center glow-red">
-            <span className="text-white text-sm font-bold">M</span>
+    <div className="min-h-screen bg-[#06070a] text-white selection:bg-red-500/30 selection:text-white relative overflow-x-hidden font-sans">
+      {/* ── TOP HEADER / NAVBAR ── */}
+      <header className="sticky top-0 z-50 w-full border-b border-white/[0.06] bg-[#06070a]/90 backdrop-blur-md">
+        <div className="max-w-[1400px] mx-auto px-6 h-20 flex items-center justify-between">
+          {/* Brand with Heartbeat line */}
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate('/')}>
+            {/* Heartbeat pulse icon */}
+            <svg className="w-7 h-7 text-[#FF2D4A]" viewBox="0 0 24 12" fill="none" stroke="currentColor" strokeWidth={2.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M0 6h6l2.5-6 4 12 2.5-6h9" />
+            </svg>
+            <div>
+              <div className="font-extrabold text-2xl tracking-tight text-white flex items-center">
+                Medi<span className="text-[#FF2D4A]">Route</span>
+              </div>
+              <div className="text-[8px] font-mono uppercase tracking-[0.28em] text-white/40 -mt-1 font-semibold">
+                INTELLIGENCE IN EVERY MILE
+              </div>
+            </div>
           </div>
-          <span className="font-display font-bold text-xl text-white">
-            Medi<span className="text-emergency">Route</span>
-          </span>
-        </div>
-        <div className="hidden md:flex items-center gap-8 text-sm text-white/60">
-          {['Features', 'How It Works', 'Portals'].map((item) => (
-            <a
-              key={item}
-              href={`#${item.toLowerCase().replace(' ', '-')}`}
-              className="hover:text-white transition-colors"
+
+          {/* Nav links */}
+          <nav className="hidden lg:flex items-center gap-9 text-xs font-semibold text-white/70 tracking-wide">
+            <a href="#platform" className="hover:text-white transition-colors">Platform</a>
+            <a href="#workflow" className="hover:text-white transition-colors">AI Triage</a>
+            <a href="#gis-network" className="hover:text-white transition-colors">GIS Network</a>
+            <a href="#impact" className="hover:text-white transition-colors">Impact</a>
+            <a href="#docs" className="hover:text-white transition-colors">Documentation</a>
+          </nav>
+
+          {/* Right actions */}
+          <div className="flex items-center gap-4">
+            {/* Live telemetry badge */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-500/20 bg-emerald-950/20 text-emerald-400 text-xs font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]" />
+              <span className="font-medium">Live City Telemetry</span>
+            </div>
+
+            {/* Launch Portal button */}
+            <button
+              onClick={() => navigate('/login')}
+              className="px-5 py-2 rounded-lg bg-gradient-to-r from-[#941324] via-[#b5172e] to-[#941324] hover:from-[#b5172e] hover:to-[#c91a33] text-white text-xs font-semibold border border-red-500/40 shadow-[0_0_20px_rgba(255,45,74,0.3)] transition-all flex items-center gap-2"
             >
-              {item}
-            </a>
+              <span>Launch Portal</span>
+              <span>→</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* ── HERO SECTION ── */}
+      <section className="relative pt-12 pb-16 px-6 max-w-[1400px] mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+          {/* Left Column: Typography & CTAs */}
+          <div className="lg:col-span-6 space-y-6 z-10">
+            <div className="text-[11px] font-mono tracking-[0.25em] text-white/50 uppercase font-semibold">
+              FASTER RESPONSE. BRIGHTER TOMORROWS.
+            </div>
+
+            <h1 className="text-4xl sm:text-6xl xl:text-7xl font-extrabold tracking-tight text-white leading-[1.06]">
+              Every Second <br />
+              Engineered for <br />
+              <span className="text-[#FF2D4A] drop-shadow-[0_0_40px_rgba(255,45,74,0.45)]">
+                Survival.
+              </span>
+            </h1>
+
+            <p className="text-white/60 text-sm sm:text-base leading-relaxed max-w-lg">
+              MediRoute leverages multi-agent AI, real-time traffic intelligence and dynamic hospital allocation to deliver the right care, to the right patient, at the right time.
+            </p>
+
+            {/* Buttons */}
+            <div className="flex flex-col sm:flex-row gap-4 pt-4">
+              {/* Emergency SOS Button */}
+              <button
+                onClick={() => navigate('/login')}
+                className="group relative px-6 py-3.5 rounded-xl bg-gradient-to-r from-[#b31427] to-[#e61732] hover:from-[#e61732] hover:to-[#b31427] text-white shadow-[0_0_30px_rgba(255,45,74,0.4)] border border-red-400/40 transition-all flex items-center justify-between min-w-[220px]"
+              >
+                <div className="flex items-center gap-3 text-left">
+                  <span className="text-2xl">🚑</span>
+                  <div>
+                    <div className="text-sm font-bold tracking-wide">Emergency SOS</div>
+                    <div className="text-[10px] text-white/70 font-mono">Get help now</div>
+                  </div>
+                </div>
+                <span className="text-lg font-bold ml-4 group-hover:translate-x-1 transition-transform">→</span>
+              </button>
+
+              {/* Explore Platform Button */}
+              <button
+                onClick={() => {
+                  const el = document.getElementById('platform')
+                  el?.scrollIntoView({ behavior: 'smooth' })
+                }}
+                className="px-6 py-3.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/10 text-white transition-all flex items-center gap-3 text-left min-w-[200px]"
+              >
+                <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-[10px]">
+                  ▶
+                </div>
+                <div>
+                  <div className="text-sm font-bold">Explore the Platform</div>
+                  <div className="text-[10px] text-white/50 font-mono">See how it works</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Right Column: Exact 3D City Night Scene Visualizer */}
+          <div className="lg:col-span-6 relative">
+            <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-[#08090e] shadow-[0_0_60px_rgba(0,0,0,0.9)]">
+              {/* City illustration asset */}
+              <img
+                src="/hero-city.jpg"
+                alt="MediRoute Dynamic City GIS Grid"
+                className="w-full h-auto object-cover opacity-95 select-none"
+              />
+
+              {/* Overlay vignette */}
+              <div className="absolute inset-0 bg-gradient-to-r from-[#06070a]/80 via-transparent to-transparent pointer-events-none" />
+
+              {/* Floating Badge 1: Patient Pin */}
+              <div className="absolute top-[28%] left-[28%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
+                <div className="px-3 py-1.5 rounded-md bg-[#0a0a14]/90 border border-red-500/40 text-[10px] font-mono text-center shadow-xl backdrop-blur-md">
+                  <div className="text-red-400 font-bold">Patient</div>
+                  <div className="text-white/70 text-[9px]">AI Triage: <strong className="text-white">ESI 1</strong></div>
+                </div>
+              </div>
+
+              {/* Floating Badge 2: Trauma Center Pin */}
+              <div className="absolute top-[18%] right-[8%] flex flex-col items-center">
+                <div className="px-3.5 py-2 rounded-md bg-[#0a0a14]/90 border border-cyan-500/40 text-[10px] font-mono text-center shadow-xl backdrop-blur-md">
+                  <div className="text-cyan-300 font-bold">Trauma Center</div>
+                  <div className="text-white/70 text-[9px]">ETA 6 min · <strong className="text-cyan-400">Bed Reserved</strong></div>
+                </div>
+              </div>
+
+              {/* Bottom Right Tag */}
+              <div className="absolute bottom-3 right-4 text-[9px] font-mono tracking-[0.25em] text-white/40 uppercase font-semibold">
+                SMART CITIES · SAFER PEOPLE
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── METRICS STRIP (Matches Image 1 bottom) ── */}
+        <div className="mt-14 rounded-xl border border-white/[0.08] bg-[#090a10] p-6 grid grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Card 1 */}
+          <div className="border-r border-white/[0.06] last:border-0 pr-4">
+            <div className="flex items-center gap-2 text-white/40 text-[11px] font-mono uppercase tracking-wider mb-1">
+              <span>⏱</span>
+              <span>AVERAGE RESPONSE TIME</span>
+            </div>
+            <div className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+              4.2 min
+            </div>
+            <div className="text-xs font-mono text-emerald-400 mt-1 flex items-center gap-1">
+              <span>↓ 28%</span>
+              <span className="text-white/40">vs. city average</span>
+            </div>
+          </div>
+
+          {/* Card 2 */}
+          <div className="border-r border-white/[0.06] last:border-0 pr-4">
+            <div className="flex items-center gap-2 text-white/40 text-[11px] font-mono uppercase tracking-wider mb-1">
+              <span>🛣</span>
+              <span>ACTIVE GREEN CORRIDORS</span>
+            </div>
+            <div className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+              14
+            </div>
+            <div className="text-xs font-mono text-emerald-400 mt-1 flex items-center gap-1">
+              <span>↑ Live</span>
+              <span className="text-white/40">across Mumbai</span>
+            </div>
+          </div>
+
+          {/* Card 3 */}
+          <div className="border-r border-white/[0.06] last:border-0 pr-4">
+            <div className="flex items-center gap-2 text-white/40 text-[11px] font-mono uppercase tracking-wider mb-1">
+              <span>🏥</span>
+              <span>PARTICIPATING TRAUMA CENTERS</span>
+            </div>
+            <div className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+              38
+            </div>
+            <div className="text-xs font-mono text-emerald-400 mt-1 flex items-center gap-1">
+              <span>↑ 100%</span>
+              <span className="text-white/40">real-time bed sync</span>
+            </div>
+          </div>
+
+          {/* Card 4 */}
+          <div>
+            <div className="flex items-center gap-2 text-white/40 text-[11px] font-mono uppercase tracking-wider mb-1">
+              <span>🧠</span>
+              <span>AI TRIAGE ACCURACY</span>
+            </div>
+            <div className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+              99.4%
+            </div>
+            <div className="text-xs font-mono text-emerald-400 mt-1 flex items-center gap-1">
+              <span>↑ 0.3%</span>
+              <span className="text-white/40">validated on 50K+ cases</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── "PEOPLE X TECHNOLOGY X SAFER CITIES" RIBBON ── */}
+        <div className="mt-6 rounded-xl border border-white/[0.08] bg-[#090a10] p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="space-y-1">
+            <div className="text-[10px] font-mono text-white/40 tracking-[0.2em] uppercase font-semibold">
+              BUILT FOR A STRONGER TOMORROW
+            </div>
+            <div className="text-xl sm:text-2xl font-bold text-white">
+              People <span className="text-white/30">×</span> Technology <span className="text-white/30">×</span> Safer Cities
+            </div>
+          </div>
+
+          <div className="text-xs text-white/60 max-w-md text-left md:text-center leading-relaxed">
+            A unified emergency response ecosystem connecting citizens, paramedics, hospitals and city command through intelligent technology.
+          </div>
+
+          <button
+            onClick={() => setVideoModalOpen(true)}
+            className="flex items-center gap-3 px-5 py-2.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white text-xs font-mono transition-all whitespace-nowrap"
+          >
+            <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[9px]">▶</span>
+            <span>Watch Video</span>
+            <span className="text-white/50 text-[10px]">See MediRoute in action →</span>
+          </button>
+        </div>
+
+        {/* ── TRUSTED PARTNERS STRIP ── */}
+        <div className="mt-8 pt-6 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-6 text-white/40 text-xs font-mono">
+          <div className="flex flex-wrap items-center gap-6">
+            <span className="text-white/30 uppercase tracking-widest text-[10px]">TRUSTED PARTNERS</span>
+            <span className="hover:text-white/70 transition-colors">🏛️ Ministry of Health & Family Welfare</span>
+            <span className="hover:text-white/70 transition-colors">🏙️ BMC</span>
+            <span className="hover:text-white/70 transition-colors">🩺 NATIONAL HEALTH MISSION</span>
+            <span className="hover:text-white/70 transition-colors">🌐 Smart City</span>
+            <span className="hover:text-white/70 transition-colors">⚛️ AI FOR SOCIAL GOOD</span>
+          </div>
+
+          <div className="flex items-center gap-2 text-white/40 text-[11px]">
+            <span>FASTER CARE. STRONGER COMMUNITIES.</span>
+            <svg className="w-6 h-3 text-[#FF2D4A]" viewBox="0 0 24 12" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M0 6h6l2-6 4 12 2-6h10" />
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION 2: ONE PLATFORM. A STRONGER RESPONSE (Matches Image 3) ── */}
+      <section id="platform" className="py-20 px-6 max-w-[1400px] mx-auto border-t border-white/[0.06]">
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
+          <div>
+            <div className="text-[10px] font-mono text-white/40 tracking-[0.25em] uppercase font-semibold mb-2">
+              BUILT FOR EVERY STAKEHOLDER
+            </div>
+            <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+              One Platform. <span className="text-white">A Stronger Response.</span>
+            </h2>
+          </div>
+
+          <div className="text-[11px] font-mono text-white/40 tracking-widest uppercase">
+            DIFFERENT ROLES. A SHARED MISSION.
+          </div>
+        </div>
+
+        {/* 4 Cards Grid (With Exact Photos Cropped from Image 3) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          {portalCards.map((card) => (
+            <motion.div
+              key={card.num}
+              whileHover={{ y: -5, transition: { duration: 0.2 } }}
+              onClick={() => navigate(card.path)}
+              className="group cursor-pointer rounded-xl border p-5 flex flex-col justify-between relative overflow-hidden transition-all bg-[#090a10]"
+              style={{
+                borderColor: `${card.accentColor}30`,
+                boxShadow: `0 0 25px rgba(0,0,0,0.5)`,
+              }}
+            >
+              <div>
+                {/* Header with Icon, Name, and Arrow Number */}
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-9 h-9 rounded-lg flex items-center justify-center"
+                      style={{ background: `${card.accentColor}15`, border: `1px solid ${card.accentColor}30` }}
+                    >
+                      {card.icon}
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-white leading-tight">{card.role}</div>
+                      <div className="text-[11px] font-mono text-white/50">{card.subrole}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono text-white/30">{card.num}</span>
+                    <span className="w-6 h-6 rounded-full border border-white/20 flex items-center justify-center text-xs text-white/50 group-hover:text-white group-hover:border-white transition-all">
+                      →
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-white/60 text-xs leading-relaxed mb-4 min-h-[36px]">
+                  {card.desc}
+                </p>
+              </div>
+
+              {/* Exact Photo Crop from User's Generation */}
+              <div>
+                <div className="w-full h-36 rounded-lg overflow-hidden border border-white/10 bg-black relative">
+                  <img
+                    src={card.image}
+                    alt={card.role}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                </div>
+                <div className="mt-3 text-[9px] font-mono tracking-[0.2em] text-white/40 uppercase font-semibold">
+                  {card.tag}
+                </div>
+              </div>
+            </motion.div>
           ))}
         </div>
-        <button
-          onClick={() => navigate('/login')}
-          className="btn-ghost text-sm px-4 py-2"
-        >
-          Launch Platform →
-        </button>
-      </nav>
-
-      {/* ── Hero Section ── */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-        {/* 3D Globe Canvas */}
-        <motion.div
-          style={{ y: globeY, opacity: globeOpacity }}
-          className="absolute inset-0 z-0"
-        >
-          <Canvas
-            camera={{ position: [0, 0, 7], fov: 50 }}
-            gl={{ antialias: true, alpha: true }}
-            style={{ background: 'transparent' }}
-          >
-            <Suspense fallback={null}>
-              <Scene />
-            </Suspense>
-          </Canvas>
-        </motion.div>
-
-        {/* Background radial glow */}
-        <div
-          className="absolute inset-0 z-0 pointer-events-none"
-          style={{
-            background: 'radial-gradient(ellipse 80% 60% at 50% 50%, rgba(255,45,74,0.08) 0%, transparent 70%)',
-          }}
-        />
-
-        {/* Grid pattern */}
-        <div className="absolute inset-0 z-0 opacity-20 bg-grid-pattern pointer-events-none" />
-
-        {/* Hero content */}
-        <div className="relative z-10 text-center px-6 max-w-6xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-emergency/30 bg-emergency/10 mb-8"
-          >
-            <span className="pulse-dot text-emergency" />
-            <span className="text-emergency text-sm font-mono font-medium">
-              SYSTEM ONLINE — AI DISPATCH ACTIVE
-            </span>
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.4 }}
-            className="font-display font-bold leading-tight mb-6"
-            style={{ fontSize: 'clamp(3rem, 8vw, 7rem)' }}
-          >
-            <span className="text-white">Every Second</span>
-            <br />
-            <span className="gradient-text-emergency text-glow-red">Saves a Life.</span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.6 }}
-            className="text-white/60 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed mb-10"
-          >
-            AI-powered emergency dispatch with real-time hospital allocation,
-            dynamic green-corridor routing, and zero-wait ER handover.
-          </motion.p>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.8 }}
-            className="flex flex-col sm:flex-row gap-4 justify-center"
-          >
-            <button onClick={() => navigate('/login')} className="btn-emergency text-base">
-              <span>🚨</span> Launch MediRoute
-            </button>
-            <a href="#how-it-works" className="btn-ghost text-base">
-              See How It Works
-            </a>
-          </motion.div>
-
-          {/* Scroll indicator */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 2, duration: 1 }}
-            className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
-          >
-            <span className="text-white/30 text-xs font-mono uppercase tracking-widest">Scroll</span>
-            <motion.div
-              animate={{ y: [0, 8, 0] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-              className="w-px h-8 bg-gradient-to-b from-emergency to-transparent"
-            />
-          </motion.div>
-        </div>
       </section>
 
-      {/* ── Stats Bar ── */}
-      <section className="relative py-16 border-y border-surface-border">
-        <div className="absolute inset-0 bg-gradient-to-r from-emergency/5 via-transparent to-cyber/5" />
-        <div className="max-w-5xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8">
-          <AnimatedCounter target={8} suffix="s" label="Avg. Dispatch Time" />
-          <AnimatedCounter target={94} suffix="%" label="AI Triage Accuracy" />
-          <AnimatedCounter target={1000} suffix="+" label="Hospitals Networked" />
-          <AnimatedCounter target={37} suffix="%" label="Mortality Reduction" />
-        </div>
-      </section>
-
-      {/* ── Features ── */}
-      <section id="features" className="py-24 px-6">
-        <div className="max-w-6xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <div className="text-cyber font-mono text-sm uppercase tracking-widest mb-3">
-              AI Engine Suite
+      {/* ── SECTION 3: THE MEDIROUTE FLOW (Matches Image 3) ── */}
+      <section id="workflow" className="py-20 px-6 max-w-[1400px] mx-auto border-t border-white/[0.06]">
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-4">
+          <div>
+            <div className="text-[10px] font-mono text-white/40 tracking-[0.25em] uppercase font-semibold mb-2">
+              THE MEDIROUTE FLOW
             </div>
-            <h2 className="font-display text-5xl font-bold text-white mb-4">
-              Next-Gen{' '}
-              <span className="gradient-text-cyber">Intelligence</span>
+            <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+              From Distress to <span className="text-[#3B82F6]">Definitive Care</span>
             </h2>
-            <p className="text-white/50 max-w-xl mx-auto">
-              Five AI modules working in concert to eliminate every bottleneck in emergency response.
-            </p>
-          </motion.div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {features.map((f, i) => (
-              <FeatureCard key={i} {...f} delay={i * 0.1} />
-            ))}
+          </div>
+
+          <div className="text-[11px] font-mono text-white/40 tracking-widest uppercase">
+            INTELLIGENCE ACROSS EVERY STEP
           </div>
         </div>
-      </section>
 
-      {/* ── How It Works ── */}
-      <section id="how-it-works" className="py-24 px-6 bg-surface-card/50">
-        <div className="max-w-5xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <div className="text-emergency font-mono text-sm uppercase tracking-widest mb-3">
-              End-to-End Workflow
+        {/* 5 Connected Step Circles */}
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 relative">
+          {workflowItems.map((item, idx) => (
+            <div
+              key={item.step}
+              className="flex flex-col items-center text-center p-4 rounded-xl border border-white/[0.05] bg-[#090a10]/60 hover:bg-[#090a10] transition-colors relative"
+            >
+              {/* Circular Icon with number */}
+              <div className="relative mb-3 flex items-center justify-center">
+                <div
+                  className="w-14 h-14 rounded-full border-2 flex items-center justify-center bg-black/40"
+                  style={{ borderColor: item.color }}
+                >
+                  {item.icon}
+                </div>
+              </div>
+
+              {/* Number and Title */}
+              <div className="text-[10px] font-mono text-white/40 font-bold mb-1">{item.step}</div>
+              <div className="text-xs font-bold text-white mb-2 leading-snug">{item.title}</div>
+              <p className="text-[11px] text-white/50 leading-relaxed max-w-[200px]">{item.desc}</p>
+
+              {/* Connecting Arrow for desktop */}
+              {idx < 4 && (
+                <div className="hidden md:block absolute -right-3 top-10 text-white/30 text-base font-bold z-10">
+                  →
+                </div>
+              )}
             </div>
-            <h2 className="font-display text-5xl font-bold text-white mb-4">
-              From SOS to{' '}
-              <span className="gradient-text-emergency">Safe Hands</span>
-            </h2>
-          </motion.div>
-          <div className="grid md:grid-cols-2 gap-4">
-            {workflow.map((step, i) => (
-              <WorkflowStep
-                key={i}
-                step={i + 1}
-                title={step.title}
-                desc={step.desc}
-                active={i === 0}
-              />
-            ))}
-          </div>
+          ))}
         </div>
       </section>
 
-      {/* ── Portals ── */}
-      <section id="portals" className="py-24 px-6">
-        <div className="max-w-6xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <div className="text-purple-400 font-mono text-sm uppercase tracking-widest mb-3">
-              Role-Based Access
-            </div>
-            <h2 className="font-display text-5xl font-bold text-white mb-4">
-              Four{' '}
-              <span className="gradient-text-cyber">Command Portals</span>
-            </h2>
-            <p className="text-white/50 max-w-xl mx-auto">
-              Tailored interfaces for every stakeholder in the emergency response chain.
-            </p>
-          </motion.div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {portals.map((p, i) => (
-              <PortalCard key={i} {...p} />
-            ))}
-          </div>
-        </div>
-      </section>
+      {/* ── SECTION 4: PRE-FOOTER "LET'S BUILD SAFER CITIES" (Matches Image 3) ── */}
+      <section className="py-16 px-6 max-w-[1400px] mx-auto">
+        <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-[#090a10] p-8 sm:p-12 shadow-2xl">
+          {/* Skyline Silhouette Image in Background */}
+          <div
+            className="absolute inset-y-0 right-0 w-full sm:w-2/3 pointer-events-none bg-right bg-no-repeat bg-contain opacity-40 mix-blend-screen"
+            style={{ backgroundImage: 'url(/cta-skyline.jpg)' }}
+          />
 
-      {/* ── CTA ── */}
-      <section className="py-24 px-6 relative overflow-hidden">
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background: 'radial-gradient(ellipse 60% 80% at 50% 50%, rgba(255,45,74,0.12) 0%, transparent 70%)',
-          }}
-        />
-        <div className="max-w-3xl mx-auto text-center">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.8 }}
-            viewport={{ once: true }}
-          >
-            <h2 className="font-display text-6xl font-bold text-white mb-6">
-              Ready to{' '}
-              <span className="gradient-text-emergency text-glow-red">Save Lives?</span>
-            </h2>
-            <p className="text-white/50 text-lg mb-10 leading-relaxed">
-              Join the future of emergency medical response. Real-time. AI-powered. Life-saving.
-            </p>
-            <button onClick={() => navigate('/login')} className="btn-emergency text-xl px-12 py-5">
-              <span>🚨</span> Launch MediRoute Now
-            </button>
-          </motion.div>
-        </div>
-      </section>
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            <div className="lg:col-span-7 space-y-3">
+              <div className="text-[10px] font-mono tracking-[0.25em] text-white/40 uppercase font-semibold">
+                A HEALTHIER, MORE RESILIENT TOMORROW
+              </div>
 
-      {/* ── Footer ── */}
-      <footer className="border-t border-surface-border py-8 px-6">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-emergency rounded flex items-center justify-center">
-              <span className="text-white text-xs font-bold">M</span>
+              <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+                Let's Build <span className="text-[#FF2D4A]">Safer Cities.</span>
+              </h2>
+
+              <p className="text-white/60 text-xs sm:text-sm max-w-lg leading-relaxed pt-1">
+                Join government bodies, healthcare institutions and innovators in creating a faster, smarter and more humane emergency response ecosystem.
+              </p>
             </div>
-            <span className="font-display font-bold text-white">
-              Medi<span className="text-emergency">Route</span>
-            </span>
-          </div>
-          <p className="text-white/30 text-sm font-mono">
-            © 2026 MediRoute. Next-Gen Emergency Response Platform.
-          </p>
-          <div className="flex gap-4 text-white/30 text-sm">
-            {['Patient', 'Paramedic', 'Hospital', 'Admin'].map((role) => (
-              <a
-                key={role}
-                href={`/${role.toLowerCase()}`}
-                className="hover:text-white/60 transition-colors"
+
+            <div className="lg:col-span-5 flex flex-col sm:flex-row items-center gap-3 justify-end">
+              <button
+                onClick={() => navigate('/login')}
+                className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-[#941324] via-[#b5172e] to-[#941324] hover:from-[#b5172e] hover:to-[#c91a33] text-white text-xs font-bold shadow-[0_0_20px_rgba(255,45,74,0.3)] border border-red-500/40 transition-all flex items-center gap-2 whitespace-nowrap"
               >
-                {role}
-              </a>
-            ))}
+                <span>🚑 Launch Command Portal</span>
+                <span>→</span>
+              </button>
+
+              <button
+                onClick={() => { window.location.href = 'mailto:contact@mediroute.org' }}
+                className="px-6 py-3.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-white text-xs font-semibold transition-all flex items-center gap-2 whitespace-nowrap"
+              >
+                <span>Get in Touch</span>
+                <span>→</span>
+              </button>
+
+              <div className="hidden sm:block text-right text-[9px] font-mono tracking-widest text-white/30 uppercase pl-3">
+                PEOPLE<br />TECHNOLOGY<br />SAFER CITIES
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── FOOTER (Matches Image 3) ── */}
+      <footer className="border-t border-white/[0.06] py-8 px-6 max-w-[1400px] mx-auto">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-white/50 font-mono">
+          {/* Brand */}
+          <div className="flex items-center gap-3">
+            <svg className="w-5 h-5 text-[#FF2D4A]" viewBox="0 0 24 12" fill="none" stroke="currentColor" strokeWidth={2.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M0 6h6l2.5-6 4 12 2.5-6h9" />
+            </svg>
+            <span className="text-white font-bold font-display text-sm">MediRoute</span>
+            <span className="text-white/40">© 2026 MediRoute. All rights reserved.</span>
+          </div>
+
+          {/* Legal Links */}
+          <div className="flex items-center gap-6">
+            <a href="#privacy" className="hover:text-white transition-colors">Privacy</a>
+            <a href="#terms" className="hover:text-white transition-colors">Terms</a>
+            <a href="#contact" className="hover:text-white transition-colors">Contact</a>
+          </div>
+
+          {/* Tagline */}
+          <div className="flex items-center gap-2 text-white/40 text-[11px]">
+            <span>Faster Response. Brighter Tomorrows.</span>
+            <svg className="w-5 h-3 text-[#FF2D4A]" viewBox="0 0 24 12" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M0 6h6l2-6 4 12 2-6h10" />
+            </svg>
           </div>
         </div>
       </footer>
+
+      {/* Video Modal (Mock presentation) */}
+      <AnimatePresence>
+        {videoModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+            onClick={() => setVideoModalOpen(false)}
+          >
+            <div className="relative w-full max-w-3xl rounded-2xl overflow-hidden border border-white/20 bg-[#0a0a14] p-6 text-center" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <span className="font-bold text-white font-display">MediRoute Platform Overview</span>
+                <button onClick={() => setVideoModalOpen(false)} className="text-white/50 hover:text-white text-lg">✕</button>
+              </div>
+              <div className="aspect-video w-full rounded-xl bg-black border border-white/10 flex flex-col items-center justify-center p-6">
+                <div className="w-16 h-16 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center mb-3">
+                  <span className="text-2xl text-red-400">▶</span>
+                </div>
+                <div className="text-white font-semibold">MediRoute — Real-Time Emergency Coordination Engine</div>
+                <p className="text-white/50 text-xs mt-1 max-w-md">Demonstrating automated dispatch, AI triage scoring (ESI 1–5), green corridor signals, and zero-wait ER handover.</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
