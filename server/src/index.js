@@ -61,13 +61,31 @@ app.use((err, req, res, next) => {
 const io = initSockets(server)
 app.set('io', io)
 
-const PORT = process.env.PORT || 5000
-server.listen(PORT, () => {
-  console.log(`
+let currentPort = Number(process.env.PORT) || 5000
+
+function startServer(port) {
+  currentPort = port
+  server.listen(port, () => {
+    console.log(`
 ╔══════════════════════════════════════╗
 ║      MediRoute Server Running        ║
-║      Port: ${PORT}                       ║
+║      Port: ${port}                       ║
 ║      ENV: ${process.env.NODE_ENV || 'development'}                 ║
 ╚══════════════════════════════════════╝
-  `)
+    `)
+  })
+}
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    const nextPort = currentPort + 1
+    console.warn(`[MediRoute] Port ${currentPort} is in use, dynamically trying port ${nextPort}...`)
+    setTimeout(() => {
+      startServer(nextPort)
+    }, 500)
+  } else {
+    console.error('[MediRoute Server Error]', err)
+  }
 })
+
+startServer(currentPort)

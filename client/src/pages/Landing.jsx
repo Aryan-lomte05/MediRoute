@@ -1,10 +1,148 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
+import mapboxgl from 'mapbox-gl'
+import 'mapbox-gl/dist/mapbox-gl.css'
+
+mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
 export default function Landing() {
   const navigate = useNavigate()
   const [videoModalOpen, setVideoModalOpen] = useState(false)
+  const heroMapRef = useRef(null)
+
+  useEffect(() => {
+    if (!heroMapRef.current) return
+
+    const map = new mapboxgl.Map({
+      container: heroMapRef.current,
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: [72.845, 19.035],
+      zoom: 12.3,
+      pitch: 58,
+      bearing: 25,
+      interactive: true,
+      attributionControl: false,
+    })
+
+    map.on('load', () => {
+      // Traffic layer
+      if (!map.getSource('mapbox-traffic')) {
+        map.addSource('mapbox-traffic', {
+          type: 'vector',
+          url: 'mapbox://mapbox.mapbox-traffic-v1',
+        })
+        map.addLayer(
+          {
+            id: 'traffic-lines',
+            type: 'line',
+            source: 'mapbox-traffic',
+            'source-layer': 'traffic',
+            paint: {
+              'line-color': [
+                'case',
+                ['==', ['get', 'congestion'], 'low'],
+                '#10b981',
+                ['==', ['get', 'congestion'], 'moderate'],
+                '#f59e0b',
+                ['==', ['get', 'congestion'], 'heavy'],
+                '#ef4444',
+                '#00F5FF',
+              ],
+              'line-width': 2.5,
+              'line-opacity': 0.6,
+            },
+          },
+          'road-label'
+        )
+      }
+
+      // Live green corridor road line
+      const roadPath = [
+        [72.8182, 19.0435],
+        [72.8175, 19.0378],
+        [72.8188, 19.0305],
+        [72.8225, 19.0232],
+        [72.8285, 19.0162],
+        [72.8335, 19.0118],
+        [72.8385, 19.0068],
+        [72.8428, 19.0025],
+      ]
+
+      map.addSource('green-corridor-hero', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: roadPath,
+          },
+        },
+      })
+
+      map.addLayer({
+        id: 'hero-corridor-glow',
+        type: 'line',
+        source: 'green-corridor-hero',
+        paint: {
+          'line-color': '#00F5FF',
+          'line-width': 7,
+          'line-opacity': 0.4,
+          'line-blur': 3,
+        },
+      })
+
+      map.addLayer({
+        id: 'hero-corridor-core',
+        type: 'line',
+        source: 'green-corridor-hero',
+        paint: {
+          'line-color': '#00F5FF',
+          'line-width': 2.5,
+          'line-opacity': 0.9,
+        },
+      })
+
+      // Patient ESI 1 Marker
+      const patientEl = document.createElement('div')
+      patientEl.className = 'px-2.5 py-1 rounded bg-[#090a12]/90 border border-red-500/80 text-[10px] font-mono shadow-[0_0_15px_rgba(255,45,74,0.5)] backdrop-blur-sm'
+      patientEl.innerHTML = '<div class="text-red-400 font-semibold text-[9px] leading-none">Patient</div><div class="text-white/80 text-[8px] mt-0.5 leading-none">AI Triage: <span class="text-white font-bold">ESI 1</span></div>'
+      new mapboxgl.Marker({ element: patientEl, anchor: 'bottom' })
+        .setLngLat([72.8285, 19.0162])
+        .addTo(map)
+
+      // Trauma Center Marker
+      const hospEl = document.createElement('div')
+      hospEl.className = 'px-3 py-1.5 rounded bg-[#090a12]/90 border border-cyan-500/80 text-[10px] font-mono shadow-[0_0_15px_rgba(0,245,255,0.5)] backdrop-blur-sm'
+      hospEl.innerHTML = '<div class="text-cyan-300 font-semibold text-[9px] leading-none">Trauma Center</div><div class="text-white/80 text-[8px] mt-0.5 leading-none">ETA 6 min · <span class="text-cyan-400 font-bold">Bed Reserved</span></div>'
+      new mapboxgl.Marker({ element: hospEl, anchor: 'bottom' })
+        .setLngLat([72.8428, 19.0025])
+        .addTo(map)
+
+      // Animated live moving ambulance along corridor
+      const ambEl = document.createElement('div')
+      ambEl.className = 'relative flex items-center justify-center'
+      ambEl.innerHTML = '<span class="animate-ping absolute inline-flex h-6 w-6 rounded-full bg-red-500 opacity-75"></span><div class="w-6 h-6 rounded-lg bg-[#FF2D4A] border border-white flex items-center justify-center text-white text-[10px] shadow-[0_0_15px_#FF2D4A]">🚑</div>'
+      const ambMarker = new mapboxgl.Marker({ element: ambEl, anchor: 'center' })
+        .setLngLat(roadPath[0])
+        .addTo(map)
+
+      let step = 0
+      const total = roadPath.length
+      const anim = () => {
+        step = (step + 0.006) % (total - 1)
+        const i = Math.floor(step)
+        const f = step - i
+        const lng = roadPath[i][0] + (roadPath[i + 1][0] - roadPath[i][0]) * f
+        const lat = roadPath[i][1] + (roadPath[i + 1][1] - roadPath[i][1]) * f
+        ambMarker.setLngLat([lng, lat])
+        requestAnimationFrame(anim)
+      }
+      requestAnimationFrame(anim)
+    })
+
+    return () => map.remove()
+  }, [])
 
   const portalCards = [
     {
@@ -179,13 +317,9 @@ export default function Landing() {
 
       {/* ── HERO SECTION (Full-bleed seamless gradient flow) ── */}
       <section className="relative min-h-[580px] lg:min-h-[660px] xl:min-h-[720px] flex items-center overflow-hidden">
-        {/* Full-bleed City Background Canvas (Seamlessly emerges from left & bottom gradients) */}
-        <div className="absolute top-0 right-0 w-full lg:w-[68%] xl:w-[65%] h-full pointer-events-none select-none z-0">
-          <img
-            src="/hero-city.jpg"
-            alt="MediRoute Dynamic City GIS Grid"
-            className="w-full h-full object-cover object-[center_35%]"
-          />
+        {/* Full-bleed Real Live City Mapbox GL Canvas */}
+        <div className="absolute top-0 right-0 w-full lg:w-[68%] xl:w-[65%] h-full z-0">
+          <div ref={heroMapRef} className="w-full h-full" />
           {/* Smooth Left Gradient Fade: transitions from pure #06070a into city visual */}
           <div className="absolute inset-y-0 left-0 w-full md:w-3/5 lg:w-1/2 bg-gradient-to-r from-[#06070a] via-[#06070a]/90 to-transparent" />
           {/* Top Gradient Fade */}
