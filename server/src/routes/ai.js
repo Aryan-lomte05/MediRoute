@@ -1,6 +1,6 @@
 const express = require('express')
 const axios = require('axios')
-const { auth } = require('../middleware/auth')
+const { auth, optionalAuth } = require('../middleware/auth')
 
 const router = express.Router()
 
@@ -210,8 +210,8 @@ router.post('/voice-transcript', auth, async (req, res, next) => {
   }
 })
 
-// GET /api/ai/surge-forecast — Surge forecasting (simulated for free tier)
-router.get('/surge-forecast', auth, async (req, res, next) => {
+// GET /api/ai/surge-forecast — Surge forecasting
+router.get('/surge-forecast', optionalAuth, async (req, res, next) => {
   try {
     const hours = []
     const now = new Date()

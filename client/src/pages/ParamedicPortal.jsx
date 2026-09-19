@@ -13,6 +13,9 @@ mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 export default function ParamedicPortal() {
   const { user, logout } = useAuthStore()
 
+  // Cockpit Navigation Tab
+  const [paramedicTab, setParamedicTab] = useState('nav') // 'nav' | 'vitals' | 'protocols' | 'voice'
+
   // Live Clock State
   const [currentTime, setCurrentTime] = useState('20:24')
   const [currentDate, setCurrentDate] = useState('Thu, 19 Sep 2026')
@@ -37,6 +40,7 @@ export default function ParamedicPortal() {
     spO2: 92,
     gcs: 13,
   })
+
   const [activeChecklist, setActiveChecklist] = useState([
     { id: 1, text: "Administer 500 mL IV crystalloid bolus (Ringer's Lactate)", done: true },
     { id: 2, text: 'Apply high-flow oxygen via non-rebreather mask (15 L/min)', done: true },
@@ -116,7 +120,7 @@ export default function ParamedicPortal() {
     socket.on('incident_status', (data) => {
       if (data.incidentId === activeIncident?._id) {
         setDispatchStatus(data.status)
-        setActiveIncident((prev) => prev ? { ...prev, status: data.status } : prev)
+        setActiveIncident((prev) => (prev ? { ...prev, status: data.status } : prev))
       }
     })
 
@@ -140,7 +144,7 @@ export default function ParamedicPortal() {
 
   // Live Mapbox Initialization
   useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return
+    if (paramedicTab !== 'nav' || !mapRef.current || mapInstanceRef.current) return
 
     const map = new mapboxgl.Map({
       container: mapRef.current,
@@ -150,34 +154,37 @@ export default function ParamedicPortal() {
       pitch: 58,
       bearing: -25,
       antialias: true,
+      attributionControl: false,
     })
 
     map.on('load', () => {
-      // 3D Building Extrusions
-      map.addLayer({
-        id: '3d-buildings',
-        source: 'composite',
-        'source-layer': 'building',
-        filter: ['==', 'extrude', 'true'],
-        type: 'fill-extrusion',
-        minzoom: 12,
-        paint: {
-          'fill-extrusion-color': [
-            'interpolate',
-            ['linear'],
-            ['get', 'height'],
-            0, '#0d111d',
-            40, '#131b2e',
-            120, '#1c2847',
-            250, '#2b3b68',
-          ],
-          'fill-extrusion-height': ['get', 'height'],
-          'fill-extrusion-base': ['get', 'min_height'],
-          'fill-extrusion-opacity': 0.88,
-        },
-      })
+      // 3D Buildings
+      if (!map.getLayer('3d-buildings')) {
+        map.addLayer({
+          id: '3d-buildings',
+          source: 'composite',
+          'source-layer': 'building',
+          filter: ['==', 'extrude', 'true'],
+          type: 'fill-extrusion',
+          minzoom: 12,
+          paint: {
+            'fill-extrusion-color': [
+              'interpolate',
+              ['linear'],
+              ['get', 'height'],
+              0, '#0a0d16',
+              50, '#101626',
+              150, '#18243e',
+              300, '#283862',
+            ],
+            'fill-extrusion-height': ['get', 'height'],
+            'fill-extrusion-base': ['get', 'min_height'],
+            'fill-extrusion-opacity': 0.9,
+          },
+        })
+      }
 
-      // Real-Time Road Traffic Layer
+      // Real Traffic Vector Layer
       try {
         if (!map.getSource('mapbox-traffic')) {
           map.addSource('mapbox-traffic', {
@@ -195,9 +202,10 @@ export default function ParamedicPortal() {
                 ['==', ['get', 'congestion'], 'low'], '#10b981',
                 ['==', ['get', 'congestion'], 'moderate'], '#f59e0b',
                 ['==', ['get', 'congestion'], 'heavy'], '#ef4444',
-                '#00F5FF',
+                ['==', ['get', 'congestion'], 'severe'], '#991b1b',
+                '#38bdf8',
               ],
-              'line-width': 2.4,
+              'line-width': 2.5,
               'line-opacity': 0.7,
             },
           })
@@ -206,93 +214,86 @@ export default function ParamedicPortal() {
         console.warn('Traffic error:', e)
       }
 
-      // Paramedic Real Route
-      const roadCoords = PARAMEDIC_REAL_ROUTE?.coordinates || [
-        [72.825, 19.055],
-        [72.828, 19.052],
-        [72.832, 19.048],
-        [72.836, 19.044],
-        [72.840, 19.038],
+      // Real Green Corridor GeoJSON Line
+      const routeCoords = PARAMEDIC_REAL_ROUTE?.coordinates || [
+        [72.822, 19.038],
+        [72.828, 19.041],
+        [72.836, 19.045],
+        [72.842, 19.05],
       ]
 
-      map.addSource('green-corridor-route', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: roadCoords,
+      if (!map.getSource('paramedic-corridor')) {
+        map.addSource('paramedic-corridor', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: routeCoords,
+            },
           },
-        },
-      })
+        })
 
-      map.addLayer({
-        id: 'corridor-glow',
-        type: 'line',
-        source: 'green-corridor-route',
-        paint: {
-          'line-color': '#00F5FF',
-          'line-width': 8,
-          'line-opacity': 0.35,
-          'line-blur': 3,
-        },
-      })
+        map.addLayer({
+          id: 'corridor-glow',
+          type: 'line',
+          source: 'paramedic-corridor',
+          paint: {
+            'line-color': '#00F5FF',
+            'line-width': 10,
+            'line-opacity': 0.45,
+            'line-blur': 4,
+          },
+        })
 
-      map.addLayer({
-        id: 'corridor-core',
-        type: 'line',
-        source: 'green-corridor-route',
-        paint: {
-          'line-color': '#00F5FF',
-          'line-width': 3,
-          'line-opacity': 0.95,
-        },
-      })
+        map.addLayer({
+          id: 'corridor-core',
+          type: 'line',
+          source: 'paramedic-corridor',
+          paint: {
+            'line-color': '#00F5FF',
+            'line-width': 3.5,
+            'line-opacity': 0.95,
+          },
+        })
+      }
+
+      // Ambulance Position Marker
+      const ambEl = document.createElement('div')
+      ambEl.innerHTML = `
+        <div class="relative flex items-center justify-center">
+          <span class="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-cyan-400 opacity-60"></span>
+          <div class="w-8 h-8 rounded-xl bg-[#061424] border-2 border-cyan-400 flex items-center justify-center text-white text-base shadow-[0_0_20px_#00F5FF]">
+            🚑
+          </div>
+        </div>
+      `
+      new mapboxgl.Marker({ element: ambEl, anchor: 'center' })
+        .setLngLat(routeCoords[0])
+        .addTo(map)
 
       // Destination Hospital Marker
       const hospEl = document.createElement('div')
-      hospEl.className = 'px-2 py-1 rounded bg-[#7C3AED] border border-[#A855F7] text-white text-[9px] font-mono font-bold shadow-xl'
-      hospEl.innerHTML = `🏥 ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Center'}`
-      new mapboxgl.Marker({ element: hospEl, anchor: 'bottom' })
-        .setLngLat([72.8265, 19.0599])
-        .addTo(map)
-
-      // Live Ambulance Marker
-      const ambEl = document.createElement('div')
-      ambEl.className = 'relative flex items-center justify-center'
-      ambEl.innerHTML = `
-        <span class="animate-ping absolute inline-flex h-7 w-7 rounded-full bg-red-500 opacity-75"></span>
-        <div class="relative w-8 h-8 rounded-lg bg-[#FF2D4A] border-2 border-white flex items-center justify-center text-white text-xs shadow-[0_0_20px_#FF2D4A] font-bold">
-          🚑
+      hospEl.innerHTML = `
+        <div class="px-3 py-1.5 rounded-lg bg-[#7C3AED] border-2 border-[#A855F7] text-white font-mono font-bold text-xs shadow-[0_0_25px_rgba(168,85,247,0.9)] flex items-center gap-1.5">
+          <span>🏥</span>
+          <span>${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}</span>
         </div>
       `
-      const ambMarker = new mapboxgl.Marker({ element: ambEl, anchor: 'center' })
-        .setLngLat(roadCoords[0])
+      new mapboxgl.Marker({ element: hospEl, anchor: 'bottom' })
+        .setLngLat(routeCoords[routeCoords.length - 1])
         .addTo(map)
-
-      let step = 0
-      const total = roadCoords.length
-      const anim = () => {
-        step = (step + 0.006) % (total - 1)
-        const idx = Math.floor(step)
-        const frac = step - idx
-        const p1 = roadCoords[idx]
-        const p2 = roadCoords[idx + 1]
-        const curLng = p1[0] + (p2[0] - p1[0]) * frac
-        const curLat = p1[1] + (p2[1] - p1[1]) * frac
-
-        ambMarker.setLngLat([curLng, curLat])
-        requestAnimationFrame(anim)
-      }
-      anim()
     })
 
     mapInstanceRef.current = map
 
-    return () => map.remove()
-  }, [activeIncident?.allocatedHospital?.name])
+    return () => {
+      map.remove()
+      mapInstanceRef.current = null
+    }
+  }, [paramedicTab, activeIncident?.allocatedHospital?.name])
 
-  // Camera toggle 3D / 2D
+  // Camera Controls
   const toggle3D = (mode) => {
     setMapMode(mode)
     if (!mapInstanceRef.current) return
@@ -324,7 +325,7 @@ export default function ParamedicPortal() {
         })
       }
       toast.success(`Live vitals telemetry synchronized with ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`)
-    } catch (err) {
+    } catch {
       toast.success('Live vitals synchronized with ER!')
     }
   }
@@ -372,12 +373,20 @@ export default function ParamedicPortal() {
     toast.success(`Incident completed: Patient successfully handed to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Team'}!`)
   }
 
+  // Vitals Increment / Decrement
+  const adjustVital = (key, delta) => {
+    setPatientVitals((prev) => ({
+      ...prev,
+      [key]: Math.max(0, prev[key] + delta),
+    }))
+  }
+
   return (
     <div className="min-h-screen bg-[#06080e] text-white flex flex-col font-sans select-none overflow-x-hidden">
       {/* ── TOP COCKPIT STATUS BAR ── */}
       <header className="h-14 border-b border-white/[0.08] bg-[#07090e]/95 backdrop-blur-md px-5 flex items-center justify-between z-40 shrink-0">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => window.location.href = '/'}>
+          <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => (window.location.href = '/')}>
             <svg className="w-6 h-6 text-[#FF2D4A]" viewBox="0 0 24 12" fill="none" stroke="currentColor" strokeWidth={2.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M0 6h6l2.5-6 4 12 2.5-6h9" />
             </svg>
@@ -427,9 +436,67 @@ export default function ParamedicPortal() {
         </div>
       </header>
 
+      {/* ── COCKPIT SUB-NAVIGATION BAR ── */}
+      <nav className="h-10 border-b border-white/[0.06] bg-[#090c15] px-5 flex items-center justify-between text-xs font-mono z-30 shrink-0">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setParamedicTab('nav')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+              paramedicTab === 'nav'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50'
+                : 'text-white/60 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>🧭</span>
+            <span>Navigation & Corridor</span>
+          </button>
+
+          <button
+            onClick={() => setParamedicTab('vitals')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+              paramedicTab === 'vitals'
+                ? 'bg-red-500/20 text-red-300 border border-red-500/50'
+                : 'text-white/60 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>❤️</span>
+            <span>Patient Telemetry & Vitals</span>
+          </button>
+
+          <button
+            onClick={() => setParamedicTab('protocols')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+              paramedicTab === 'protocols'
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50'
+                : 'text-white/60 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>📋</span>
+            <span>Clinical Protocols</span>
+          </button>
+
+          <button
+            onClick={() => setParamedicTab('voice')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+              paramedicTab === 'voice'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+                : 'text-white/60 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>🎙️</span>
+            <span>Whisper Voice Log</span>
+          </button>
+        </div>
+
+        <div className="hidden sm:flex items-center gap-2 text-[11px] text-emerald-400 font-mono">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Green Wave Signals Synchronized</span>
+        </div>
+      </nav>
+
       {/* ── TOP HUD CARDS ROW (3 Cards: Hospital / Route / Alert) ── */}
       <div className="p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 shrink-0">
-        {/* Card 1: Destination Hospital Card (NO STATIC PHOTOS — Dynamic Care HUD) */}
+        {/* Card 1: Destination Hospital Card */}
         <div className="lg:col-span-5 p-3.5 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600/30 to-blue-600/30 border border-purple-500/40 flex flex-col items-center justify-center text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.3)] shrink-0">
             <span className="text-xl">🏥</span>
@@ -441,7 +508,8 @@ export default function ParamedicPortal() {
               DESTINATION FACILITY
             </div>
             <div className="text-base font-extrabold text-white leading-tight truncate">
-              {activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Center'} <span className="text-cyan-400 font-normal">— Bay 03</span>
+              {activeIncident?.allocatedHospital?.name || 'Lilavati Hospital & Research Centre'}{' '}
+              <span className="text-cyan-400 font-normal">— Bay 01</span>
             </div>
             <div className="text-xs text-white/50 leading-tight mt-0.5">Bandra West, Mumbai</div>
 
@@ -502,330 +570,300 @@ export default function ParamedicPortal() {
               if (socket) {
                 socket.emit('trauma_alert', { incidentId: activeIncident?._id, vitals: patientVitals })
               }
-              toast.error(`🚨 High-Priority Trauma Alert Broadcast to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`)
+              toast.error(
+                `🚨 High-Priority Trauma Alert Broadcast to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`
+              )
             }}
             className="w-full h-full p-4 rounded-2xl bg-gradient-to-r from-[#8b1424] via-[#b5172e] to-[#8b1424] hover:from-[#b5172e] hover:to-[#c91a33] border border-red-500/50 shadow-[0_0_30px_rgba(255,45,74,0.35)] flex items-center justify-center gap-3 text-left transition-all group"
           >
             <span className="text-3xl group-hover:scale-110 transition-transform">((•))</span>
             <div>
-              <div className="text-base font-extrabold text-white leading-tight">
-                Alert Hospital
-              </div>
-              <div className="text-[11px] text-white/80 font-mono">
-                Direct Trauma Bay Pre-Alert
-              </div>
+              <div className="text-base font-extrabold text-white leading-tight">Alert Hospital</div>
+              <div className="text-[11px] text-white/80 font-mono">Direct Trauma Bay Pre-Alert</div>
             </div>
           </button>
         </div>
       </div>
 
-      {/* ── TURN-BY-TURN NAVIGATION INSTRUCTION BAR ── */}
-      <div className="mx-4 mb-3 px-4 py-2.5 rounded-xl bg-[#0a0f1d] border border-cyan-500/30 shadow-lg flex items-center justify-between gap-4 shrink-0 text-left">
-        <div className="flex items-center gap-3.5">
-          <div className="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 text-xl font-bold shrink-0">
-            ↰
-          </div>
-          <div>
-            <div className="text-sm font-extrabold text-white leading-tight">
-              In 300 m, keep left on Western Express Flyover
-            </div>
-            <div className="text-[11px] text-emerald-400 font-mono leading-tight">
-              Corridor Priority Active — Green Wave Synchronized
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => recenter()}
-            className="px-3 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-mono text-white/80 transition-all flex items-center gap-1.5"
-          >
-            <span>Recenter</span>
-            <span>⤢</span>
-          </button>
-        </div>
-      </div>
-
-      {/* ── CENTER: LIVE 3D MAPBOX NAVIGATION ENGINE ── */}
-      <div className="mx-4 h-[320px] lg:h-[380px] rounded-2xl overflow-hidden border border-white/[0.08] relative shadow-2xl shrink-0">
-        <div ref={mapRef} className="w-full h-full" />
-
-        {/* Map Left Controls HUD */}
-        <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
-          <div className="p-1 rounded-xl bg-[#090d16]/90 border border-white/10 shadow-xl backdrop-blur-md flex flex-col gap-1 text-xs font-mono">
-            <button
-              onClick={() => toggle3D('3D')}
-              className={`px-2.5 py-1 rounded-lg transition-all font-bold ${
-                mapMode === '3D' ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50' : 'text-white/60 hover:text-white'
-              }`}
-            >
-              3D
-            </button>
-            <button
-              onClick={() => toggle3D('2D')}
-              className={`px-2.5 py-1 rounded-lg transition-all font-bold ${
-                mapMode === '2D' ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50' : 'text-white/60 hover:text-white'
-              }`}
-            >
-              2D
-            </button>
-          </div>
-
-          <button
-            onClick={() => recenter()}
-            title="Recenter Camera"
-            className="w-9 h-9 rounded-xl bg-[#090d16]/90 border border-white/10 hover:border-white/25 text-cyan-400 flex items-center justify-center shadow-xl backdrop-blur-md transition-all"
-          >
-            🎯
-          </button>
-        </div>
-
-        {/* Bottom Left Map Overlay */}
-        <div className="absolute bottom-3 left-4 z-20 text-[10px] font-mono text-white/50">
-          <span className="font-bold text-white text-xs">Mumbai EMS</span> · Real Traffic Navigation View
-        </div>
-      </div>
-
-      {/* ── LOWER SECTION: PATIENT VITALS & MEDIAI CLINICAL ASSISTANT ── */}
-      <div className="p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
-        {/* ── LEFT HALF: REAL-TIME PATIENT VITALS HUD (col-span-6) ── */}
-        <div className="lg:col-span-6 p-4 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl flex flex-col justify-between">
-          <div>
-            {/* Header with ESI badge & Patient Demographics */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/[0.06] text-left">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono font-bold tracking-wider text-white uppercase">
-                  PATIENT TELEMETRY
-                </span>
-                <span className="px-2 py-0.5 rounded bg-red-600/30 border border-red-500/50 text-red-400 font-mono text-[10px] font-bold">
-                  ESI {activeIncident?.triageData?.esiLevel || 1}
-                </span>
-                <span className="text-xs text-white/50 font-medium">Critical Priority</span>
+      {/* ── WORKSPACE BODY ── */}
+      {paramedicTab === 'nav' && (
+        <div className="flex-1 flex flex-col space-y-3 px-4 pb-4 overflow-y-auto">
+          {/* Turn-by-Turn Instruction Bar */}
+          <div className="px-4 py-2.5 rounded-xl bg-[#0a0f1d] border border-cyan-500/30 shadow-lg flex items-center justify-between gap-4 shrink-0 text-left">
+            <div className="flex items-center gap-3.5">
+              <div className="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 text-xl font-bold shrink-0">
+                ↰
               </div>
-              <div className="text-[11px] font-mono text-white/50 flex items-center gap-2">
-                <span>👤 {activeIncident?.patientDetails?.name || 'Citizen Patient'}</span>
-                <span>·</span>
-                <span className="text-orange-400">🩸 {activeIncident?.patientDetails?.bloodType || 'O+'}</span>
+              <div>
+                <div className="text-sm font-extrabold text-white leading-tight">
+                  In 300 m, keep left on Western Express Flyover
+                </div>
+                <div className="text-[11px] text-emerald-400 font-mono leading-tight">
+                  Corridor Priority Active — Green Wave Synchronized
+                </div>
               </div>
             </div>
 
-            {/* 4 Live Vitals Cards Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-left">
-              {/* Vital 1: Heart Rate */}
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-red-500/30">
-                <div className="text-[11px] font-mono text-red-400 font-bold">
-                  ❤️ Heart Rate
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">
-                  {patientVitals.heartRate} <span className="text-xs font-normal text-white/50">BPM</span>
-                </div>
-                <div className="text-[10px] font-mono text-white/30 mt-0.5">(60 - 100)</div>
-              </div>
-
-              {/* Vital 2: Blood Pressure */}
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-yellow-500/30">
-                <div className="text-[11px] font-mono text-yellow-400 font-bold">
-                  💉 Blood Press.
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">
-                  {patientVitals.bpSystolic}/{patientVitals.bpDiastolic}
-                </div>
-                <div className="text-[10px] font-mono text-white/30 mt-0.5">mmHg (Hypo)</div>
-              </div>
-
-              {/* Vital 3: SpO2 */}
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-cyan-500/30">
-                <div className="text-[11px] font-mono text-cyan-400 font-bold">
-                  🫁 SpO2 Pulse
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">
-                  {patientVitals.spO2}%
-                </div>
-                <div className="text-[10px] font-mono text-white/30 mt-0.5">Target &gt; 95%</div>
-              </div>
-
-              {/* Vital 4: GCS */}
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-purple-500/30">
-                <div className="text-[11px] font-mono text-purple-400 font-bold">
-                  🧠 GCS Score
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">
-                  {patientVitals.gcs} <span className="text-xs font-normal text-white/50">/ 15</span>
-                </div>
-                <div className="text-[10px] font-mono text-white/30 mt-0.5">Altered sensorium</div>
-              </div>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => recenter()}
+                className="px-3 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-mono text-white/80 transition-all flex items-center gap-1.5"
+              >
+                <span>Recenter</span>
+                <span>⤢</span>
+              </button>
             </div>
           </div>
-        </div>
 
-        {/* ── RIGHT HALF: MEDIAI CLINICAL ASSISTANT (col-span-6) ── */}
-        <div className="lg:col-span-6 p-4 rounded-2xl bg-[#090d16]/90 border border-purple-500/30 shadow-xl flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
-              <div className="flex items-center gap-2">
-                <span className="text-purple-400 text-base">✨</span>
-                <span className="text-xs font-mono font-bold tracking-wider text-white uppercase">
-                  MediAI Clinical Decision Support
-                </span>
-              </div>
-              <div className="text-[10px] font-mono text-white/40">
-                Confidence: 96%
-              </div>
-            </div>
+          {/* Center: Live 3D Mapbox Navigation Engine */}
+          <div className="h-[320px] lg:h-[380px] rounded-2xl overflow-hidden border border-white/[0.08] relative shadow-2xl shrink-0">
+            <div ref={mapRef} className="w-full h-full" />
 
-            {/* Diagnostic Alert Banner */}
-            <div className="mt-3 p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-left">
-              <div className="flex items-center gap-2 text-red-300 font-bold text-xs">
-                <span>🚨</span>
-                <span>{activeIncident?.triageData?.chiefComplaint || 'Suspected acute trauma presentation'}</span>
-              </div>
-              <div className="text-[11px] text-white/70 mt-1">
-                {activeIncident?.triageData?.aiSummary || 'High urgency clinical protocol recommended. Prepare rapid surgical intake.'}
-              </div>
-            </div>
-
-            {/* Recommended Protocol Checklist */}
-            <div className="mt-3 space-y-1.5 text-left text-xs font-mono">
-              <div className="text-[10px] font-mono uppercase text-white/40 font-semibold mb-1">
-                Recommended Protocol Checklist:
-              </div>
-              {activeChecklist.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => {
-                    setActiveChecklist((prev) =>
-                      prev.map((c) => (c.id === item.id ? { ...c, done: !c.done } : c))
-                    )
-                  }}
-                  className="flex items-start gap-2.5 p-1.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+            {/* Map Left Controls HUD */}
+            <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
+              <div className="p-1 rounded-xl bg-[#090d16]/90 border border-white/10 shadow-xl backdrop-blur-md flex flex-col gap-1 text-xs font-mono">
+                <button
+                  onClick={() => toggle3D('3D')}
+                  className={`px-2.5 py-1 rounded-lg transition-all font-bold ${
+                    mapMode === '3D' ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50' : 'text-white/60 hover:text-white'
+                  }`}
                 >
-                  <span className={`w-4 h-4 rounded flex items-center justify-center text-[10px] shrink-0 ${
-                    item.done ? 'bg-emerald-500 text-black font-bold' : 'border border-white/30 text-white/50'
-                  }`}>
-                    {item.done ? '✓' : item.id}
-                  </span>
-                  <span className={`text-[11px] leading-tight ${item.done ? 'line-through text-white/40' : 'text-white/90'}`}>
-                    {item.text}
-                  </span>
+                  3D
+                </button>
+                <button
+                  onClick={() => toggle3D('2D')}
+                  className={`px-2.5 py-1 rounded-lg transition-all font-bold ${
+                    mapMode === '2D' ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50' : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  2D
+                </button>
+              </div>
+
+              <button
+                onClick={() => recenter()}
+                title="Recenter Camera"
+                className="w-9 h-9 rounded-xl bg-[#090d16]/90 border border-white/10 hover:border-white/25 text-cyan-400 flex items-center justify-center shadow-xl backdrop-blur-md transition-all"
+              >
+                🎯
+              </button>
+            </div>
+
+            {/* Bottom Left Map Overlay */}
+            <div className="absolute bottom-3 left-4 z-20 text-[10px] font-mono text-white/50">
+              <span className="font-bold text-white text-xs">Mumbai EMS</span> · Real Traffic Navigation View
+            </div>
+          </div>
+
+          {/* Workflow Action Bar */}
+          <div className="pt-2 grid grid-cols-3 gap-3">
+            <button
+              onClick={transmitVitals}
+              className="py-3 rounded-xl bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500/50 text-cyan-300 font-mono text-xs font-bold transition-all shadow-lg"
+            >
+              📡 Transmit Vitals to ER
+            </button>
+            <button
+              onClick={handleArrived}
+              className="py-3 rounded-xl bg-yellow-600/30 hover:bg-yellow-600/50 border border-yellow-500/50 text-yellow-300 font-mono text-xs font-bold transition-all shadow-lg"
+            >
+              📍 Arrived at Patient
+            </button>
+            <button
+              onClick={handleHandedOver}
+              className="py-3 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-300 font-mono text-xs font-bold transition-all shadow-lg"
+            >
+              🤝 Handed Over to ER
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SUBVIEW 2: PATIENT VITALS TELEMETRY & STABILIZATION */}
+      {paramedicTab === 'vitals' && (
+        <div className="flex-1 p-5 space-y-5 overflow-y-auto text-left">
+          <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+            <div>
+              <h2 className="text-xl font-extrabold text-white">Live Patient Vitals & On-Scene Stabilization</h2>
+              <p className="text-xs text-white/50 font-mono mt-0.5">
+                Adjust clinical measurements directly. Synchronizes instantly with the destination trauma room.
+              </p>
+            </div>
+
+            <button
+              onClick={transmitVitals}
+              className="px-4 py-2 rounded-xl bg-red-600/40 hover:bg-red-600/60 border border-red-500 text-white text-xs font-mono font-bold transition-all"
+            >
+              Transmit Vitals Now
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Heart Rate */}
+            <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-red-500/40 space-y-3">
+              <div className="text-xs font-mono text-red-400 font-bold uppercase">❤️ Heart Rate (Pulse)</div>
+              <div className="text-4xl font-extrabold text-white font-mono">
+                {patientVitals.heartRate} <span className="text-sm font-normal text-white/50">BPM</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => adjustVital('heartRate', -5)}
+                  className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white font-bold border border-white/10"
+                >
+                  − 5
+                </button>
+                <button
+                  onClick={() => adjustVital('heartRate', 5)}
+                  className="flex-1 py-1.5 rounded-lg bg-red-600/30 hover:bg-red-600/50 text-red-300 font-bold border border-red-500/40"
+                >
+                  + 5
+                </button>
+              </div>
+            </div>
+
+            {/* Blood Pressure */}
+            <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-yellow-500/40 space-y-3">
+              <div className="text-xs font-mono text-yellow-400 font-bold uppercase">💉 Blood Pressure</div>
+              <div className="text-4xl font-extrabold text-white font-mono">
+                {patientVitals.bpSystolic}/{patientVitals.bpDiastolic}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    adjustVital('bpSystolic', -5)
+                    adjustVital('bpDiastolic', -3)
+                  }}
+                  className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white font-bold border border-white/10"
+                >
+                  − BP
+                </button>
+                <button
+                  onClick={() => {
+                    adjustVital('bpSystolic', 5)
+                    adjustVital('bpDiastolic', 3)
+                  }}
+                  className="flex-1 py-1.5 rounded-lg bg-yellow-600/30 hover:bg-yellow-600/50 text-yellow-300 font-bold border border-yellow-500/40"
+                >
+                  + BP
+                </button>
+              </div>
+            </div>
+
+            {/* SpO2 */}
+            <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-cyan-500/40 space-y-3">
+              <div className="text-xs font-mono text-cyan-400 font-bold uppercase">🫁 Oxygen Saturation</div>
+              <div className="text-4xl font-extrabold text-white font-mono">{patientVitals.spO2}%</div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => adjustVital('spO2', -1)}
+                  className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white font-bold border border-white/10"
+                >
+                  − 1%
+                </button>
+                <button
+                  onClick={() => adjustVital('spO2', 1)}
+                  className="flex-1 py-1.5 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 font-bold border border-cyan-500/40"
+                >
+                  + 1%
+                </button>
+              </div>
+            </div>
+
+            {/* GCS */}
+            <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-purple-500/40 space-y-3">
+              <div className="text-xs font-mono text-purple-400 font-bold uppercase">🧠 Glasgow Coma Scale</div>
+              <div className="text-4xl font-extrabold text-white font-mono">{patientVitals.gcs} / 15</div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => adjustVital('gcs', -1)}
+                  className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white font-bold border border-white/10"
+                >
+                  − 1
+                </button>
+                <button
+                  onClick={() => adjustVital('gcs', 1)}
+                  className="flex-1 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 font-bold border border-purple-500/40"
+                >
+                  + 1
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUBVIEW 3: PROTOCOLS */}
+      {paramedicTab === 'protocols' && (
+        <div className="flex-1 p-5 space-y-5 overflow-y-auto text-left">
+          <div className="pb-3 border-b border-white/[0.08]">
+            <h2 className="text-xl font-extrabold text-white">Pre-Hospital Clinical Checklists</h2>
+            <p className="text-xs text-white/50 font-mono mt-0.5">
+              Protocol adherence checklist for trauma handoff and pharmacotherapy.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {activeChecklist.map((item) => (
+              <div
+                key={item.id}
+                onClick={() =>
+                  setActiveChecklist((prev) =>
+                    prev.map((c) => (c.id === item.id ? { ...c, done: !c.done } : c))
+                  )
+                }
+                className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                  item.done
+                    ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                    : 'bg-white/[0.02] border-white/10 text-white/80 hover:bg-white/[0.05]'
+                }`}
+              >
+                <div className="flex items-center gap-3 font-mono text-sm">
+                  <span className="text-lg">{item.done ? '☑' : '☐'}</span>
+                  <span>{item.text}</span>
                 </div>
-              ))}
+                <span className="text-xs font-mono text-white/40">{item.done ? 'COMPLETED' : 'PENDING'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SUBVIEW 4: WHISPER VOICE LOG */}
+      {paramedicTab === 'voice' && (
+        <div className="flex-1 p-5 space-y-5 overflow-y-auto text-left">
+          <div className="pb-3 border-b border-white/[0.08]">
+            <h2 className="text-xl font-extrabold text-white">Whisper Speech-to-Text Clinical Dictation</h2>
+            <p className="text-xs text-white/50 font-mono mt-0.5">
+              Hands-free voice transcription synced into the patient’s emergency electronic chart.
+            </p>
+          </div>
+
+          <div className="p-6 rounded-2xl bg-[#090d16]/90 border border-white/10 text-center space-y-4">
+            <button
+              onClick={handleVoiceLog}
+              className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center text-3xl transition-all shadow-xl ${
+                isRecordingVoice
+                  ? 'bg-red-600 animate-ping border-4 border-red-400'
+                  : 'bg-gradient-to-tr from-cyan-600 to-blue-500 hover:scale-105 border border-cyan-400'
+              }`}
+            >
+              🎙️
+            </button>
+            <div className="text-sm font-bold text-white">
+              {isRecordingVoice ? 'Listening & Transcribing via OpenAI Whisper...' : 'Tap to Start Hands-Free Dictation'}
             </div>
           </div>
 
-          {/* Quick Action Side Buttons */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-white/[0.06] mt-3">
-            <button
-              onClick={() => toast('📋 Trauma Resuscitation Protocol Loaded', { icon: '📄' })}
-              className="px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-mono text-white/80 transition-all flex items-center justify-center gap-1"
-            >
-              <span>📄</span>
-              <span>Protocol</span>
-            </button>
-            <button
-              onClick={() => toast('💊 Drug Dosage: Fentanyl 50mcg IV / NS 500mL Bolus', { icon: '💉' })}
-              className="px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-mono text-white/80 transition-all flex items-center justify-center gap-1"
-            >
-              <span>💉</span>
-              <span>Dosages</span>
-            </button>
-            <button
-              onClick={() => toast('🫁 Rapid Sequence Intubation Checklist Verified', { icon: '🫁' })}
-              className="px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-mono text-white/80 transition-all flex items-center justify-center gap-1"
-            >
-              <span>🫁</span>
-              <span>Airway</span>
-            </button>
-            <button
-              onClick={() => toast('📑 High-Impact Trauma Checklist Confirmed', { icon: '📋' })}
-              className="px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-mono text-white/80 transition-all flex items-center justify-center gap-1"
-            >
-              <span>📋</span>
-              <span>Checklist</span>
-            </button>
+          <div className="space-y-3">
+            <div className="text-xs font-mono text-white/40 uppercase font-semibold">Transcribed Voice Notes</div>
+            {voiceNotes.map((note, idx) => (
+              <div key={idx} className="p-4 rounded-xl bg-white/[0.03] border border-white/10 font-mono text-xs text-white/80 leading-relaxed">
+                {note}
+              </div>
+            ))}
           </div>
         </div>
-      </div>
-
-      {/* ── BOTTOM ACTION DISPATCH CONTROLS DOCK ── */}
-      <footer className="h-20 border-t border-white/[0.08] bg-[#07090e]/95 backdrop-blur-md px-5 py-2.5 z-40 shrink-0">
-        <div className="h-full grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Button 1: Voice Log Notes (Whisper STT) */}
-          <button
-            onClick={handleVoiceLog}
-            className={`h-full px-4 rounded-xl border flex items-center gap-3 transition-all ${
-              isRecordingVoice
-                ? 'bg-red-600/30 border-red-500 text-white animate-pulse'
-                : 'bg-white/[0.03] hover:bg-white/[0.07] border-white/10 text-white'
-            }`}
-          >
-            <span className="text-xl">🎙️</span>
-            <div className="text-left">
-              <div className="text-xs font-bold leading-tight">
-                {isRecordingVoice ? 'Recording Audio...' : 'Voice Log Notes'}
-              </div>
-              <div className="text-[10px] text-white/50 font-mono">
-                {isRecordingVoice ? 'Transcribing via Whisper' : 'AI Speech to Clinical Chart'}
-              </div>
-            </div>
-          </button>
-
-          {/* Button 2: Transmit Vitals to ER */}
-          <button
-            onClick={transmitVitals}
-            className="h-full px-4 rounded-xl bg-gradient-to-r from-[#941324] via-[#b5172e] to-[#941324] hover:from-[#b5172e] hover:to-[#c91a33] border border-red-500/50 shadow-[0_0_20px_rgba(255,45,74,0.3)] flex items-center gap-3 transition-all"
-          >
-            <span className="text-xl">☁️</span>
-            <div className="text-left">
-              <div className="text-xs font-bold leading-tight text-white">
-                Transmit Vitals to ER
-              </div>
-              <div className="text-[10px] text-white/80 font-mono">
-                Sync live telemetry to DB
-              </div>
-            </div>
-          </button>
-
-          {/* Button 3: Arrived at Patient */}
-          <button
-            onClick={handleArrived}
-            className={`h-full px-4 rounded-xl border flex items-center gap-3 transition-all ${
-              dispatchStatus === 'AT_PATIENT'
-                ? 'bg-emerald-600/30 border-emerald-400 text-emerald-300 font-bold shadow-[0_0_15px_rgba(16,185,129,0.3)]'
-                : 'bg-emerald-950/40 hover:bg-emerald-900/60 border-emerald-500/40 text-emerald-300'
-            }`}
-          >
-            <span className="text-xl">✅</span>
-            <div className="text-left">
-              <div className="text-xs font-bold leading-tight">
-                Arrived at Patient
-              </div>
-              <div className="text-[10px] text-emerald-400/70 font-mono">
-                Update DB care timestamp
-              </div>
-            </div>
-          </button>
-
-          {/* Button 4: Patient Handed to ER */}
-          <button
-            onClick={handleHandedOver}
-            className={`h-full px-4 rounded-xl border flex items-center gap-3 transition-all ${
-              dispatchStatus === 'COMPLETED'
-                ? 'bg-blue-600/30 border-blue-400 text-blue-300 font-bold shadow-[0_0_15px_rgba(59,130,246,0.3)]'
-                : 'bg-blue-950/40 hover:bg-blue-900/60 border-blue-500/40 text-blue-300'
-            }`}
-          >
-            <span className="text-xl">🏥</span>
-            <div className="text-left">
-              <div className="text-xs font-bold leading-tight">
-                Patient Handed to ER
-              </div>
-              <div className="text-[10px] text-blue-400/70 font-mono">
-                Mark incident completed
-              </div>
-            </div>
-          </button>
-        </div>
-      </footer>
+      )}
     </div>
   )
 }

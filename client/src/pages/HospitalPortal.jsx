@@ -13,6 +13,9 @@ mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 export default function HospitalPortal() {
   const { user, logout } = useAuthStore()
 
+  // Navigation View Tab
+  const [hospitalTab, setHospitalTab] = useState('queue') // 'queue' | 'inventory' | 'protocols' | 'mutualaid'
+
   // Live Clock
   const [currentTime, setCurrentTime] = useState('20:28:17')
   const [currentDate, setCurrentDate] = useState('Thu, 19 Sep 2026')
@@ -20,7 +23,8 @@ export default function HospitalPortal() {
   // Real Hospital Data State
   const [hospitalData, setHospitalData] = useState(null)
   const [icuAvailable, setIcuAvailable] = useState(5)
-  const [erAvailable, setErAvailable] = useState(12)
+  const [erAvailable, setErAvailable] = useState(8)
+  const [orAvailable, setOrAvailable] = useState(2)
   const [intakeStatus, setIntakeStatus] = useState('NORMAL') // 'NORMAL' | 'DIVERT'
   const [bedFilter, setBedFilter] = useState('all') // 'all' | 'occupied' | 'available' | 'cleaning'
   const [inboundIncident, setInboundIncident] = useState(null)
@@ -31,14 +35,31 @@ export default function HospitalPortal() {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
 
+  // Resource Inventory State
+  const [bloodBank, setBloodBank] = useState({
+    oNeg: 18,
+    aPos: 42,
+    bPos: 35,
+    plasma: 24,
+  })
+  const [ventilatorCount, setVentilatorCount] = useState(14)
+
   // Pre-Arrival Preparation Checklist
   const [checklist, setChecklist] = useState([
-    { id: 1, label: 'Blood Bank Notified (O-Neg)', time: '20:24', done: true },
-    { id: 2, label: 'CT Scanner Cleared', time: '20:25', done: true },
+    { id: 1, label: 'Blood Bank Notified (O-Neg 4 Units)', time: '20:24', done: true },
+    { id: 2, label: 'CT Scanner Cleared & Standby', time: '20:25', done: true },
     { id: 3, label: 'Trauma Surgery Attending Present', time: 'Pending', done: false, canNotify: true },
-    { id: 4, label: 'OR Ready (If Required)', time: 'Pending', done: false, canNotify: true },
+    { id: 4, label: 'OR Suite 02 Cleared for Laparotomy', time: 'Pending', done: false, canNotify: true },
     { id: 5, label: 'Crossmatch Samples Prepared', time: '20:26', done: true },
-    { id: 6, label: 'ICU Bed Reserved', time: 'Pending', done: false, canReserve: true },
+    { id: 6, label: 'ICU Bed Reserved (Trauma Ward)', time: 'Pending', done: false, canReserve: true },
+  ])
+
+  // Sister Regional Hospitals for Mutual Aid
+  const [sisterHospitals, setSisterHospitals] = useState([
+    { id: '1', name: 'KEM Hospital (Parel)', icu: '3/32', trauma: '6/15', status: 'NORMAL', eta: '8 min' },
+    { id: '2', name: 'Sion Hospital (LTMGH)', icu: '6/24', trauma: '4/12', status: 'NORMAL', eta: '11 min' },
+    { id: '3', name: 'Kokilaben Dhirubhai Ambani', icu: '4/20', trauma: '5/10', status: 'NORMAL', eta: '14 min' },
+    { id: '4', name: 'Holy Family Hospital', icu: '2/18', trauma: '3/8', status: 'DIVERT', eta: '6 min' },
   ])
 
   // 20 ER Bays Grid
@@ -138,10 +159,14 @@ export default function HospitalPortal() {
 
     socket.on('vitals_update', (data) => {
       if (data.vitals) {
-        setInboundIncident((prev) => prev ? {
-          ...prev,
-          triageData: { ...prev.triageData, vitals: data.vitals },
-        } : prev)
+        setInboundIncident((prev) =>
+          prev
+            ? {
+                ...prev,
+                triageData: { ...prev.triageData, vitals: data.vitals },
+              }
+            : prev
+        )
       }
     })
 
@@ -164,9 +189,11 @@ export default function HospitalPortal() {
     const nextStatus = intakeStatus === 'NORMAL' ? 'DIVERT' : 'NORMAL'
     setIntakeStatus(nextStatus)
     if (hospitalData?._id) {
-      await api.patch(`/hospitals/${hospitalData._id}/diversion`, {
-        diversionStatus: nextStatus === 'DIVERT',
-      }).catch(() => {})
+      await api
+        .patch(`/hospitals/${hospitalData._id}/diversion`, {
+          diversionStatus: nextStatus === 'DIVERT',
+        })
+        .catch(() => {})
     }
     toast(nextStatus === 'DIVERT' ? '⚠️ Emergency Intake DIVERTED' : '✅ Emergency Intake ACTIVE', {
       icon: nextStatus === 'DIVERT' ? '🚫' : '✅',
@@ -180,12 +207,14 @@ export default function HospitalPortal() {
       setIcuAvailable(nextCount)
       setChecklist((prev) => prev.map((c) => (c.id === 6 ? { ...c, done: true, time: currentTime } : c)))
       if (hospitalData?._id) {
-        await api.patch(`/hospitals/${hospitalData._id}/resources`, {
-          resources: {
-            ...hospitalData.resources,
-            icuBeds: { ...hospitalData.resources?.icuBeds, available: nextCount },
-          },
-        }).catch(() => {})
+        await api
+          .patch(`/hospitals/${hospitalData._id}/resources`, {
+            resources: {
+              ...hospitalData.resources,
+              icuBeds: { ...hospitalData.resources?.icuBeds, available: nextCount },
+            },
+          })
+          .catch(() => {})
       }
       toast.success('ICU Bed Reserved in Surgical Trauma Ward!')
     } else {
@@ -214,10 +243,9 @@ export default function HospitalPortal() {
 
   // Initialize Mapbox 3D Radar Map
   useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return
+    if (hospitalTab !== 'queue' || !mapRef.current || mapInstanceRef.current) return
 
     const ems102RoadCoords = PREFETCHED_TRAFFIC_ROUTES.find((r) => r.id === 'ems102')?.coordinates || []
-    const ems104RoadCoords = PREFETCHED_TRAFFIC_ROUTES.find((r) => r.id === 'ems104')?.coordinates || []
 
     const map = new mapboxgl.Map({
       container: mapRef.current,
@@ -234,28 +262,30 @@ export default function HospitalPortal() {
 
     map.on('load', () => {
       // 3D Buildings
-      map.addLayer({
-        id: '3d-buildings',
-        source: 'composite',
-        'source-layer': 'building',
-        filter: ['==', 'extrude', 'true'],
-        type: 'fill-extrusion',
-        minzoom: 12,
-        paint: {
-          'fill-extrusion-color': [
-            'interpolate',
-            ['linear'],
-            ['get', 'height'],
-            0, '#0d111d',
-            40, '#131b2e',
-            120, '#1c2847',
-            250, '#2b3b68',
-          ],
-          'fill-extrusion-height': ['get', 'height'],
-          'fill-extrusion-base': ['get', 'min_height'],
-          'fill-extrusion-opacity': 0.88,
-        },
-      })
+      if (!map.getLayer('3d-buildings')) {
+        map.addLayer({
+          id: '3d-buildings',
+          source: 'composite',
+          'source-layer': 'building',
+          filter: ['==', 'extrude', 'true'],
+          type: 'fill-extrusion',
+          minzoom: 12,
+          paint: {
+            'fill-extrusion-color': [
+              'interpolate',
+              ['linear'],
+              ['get', 'height'],
+              0, '#0d111d',
+              40, '#131b2e',
+              120, '#1c2847',
+              250, '#2b3b68',
+            ],
+            'fill-extrusion-height': ['get', 'height'],
+            'fill-extrusion-base': ['get', 'min_height'],
+            'fill-extrusion-opacity': 0.88,
+          },
+        })
+      }
 
       // Real Traffic Layer
       try {
@@ -288,47 +318,48 @@ export default function HospitalPortal() {
       }
 
       // Inbound route
-      map.addSource('route-ems102', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: ems102RoadCoords,
+      if (!map.getSource('route-ems102')) {
+        map.addSource('route-ems102', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: ems102RoadCoords,
+            },
           },
-        },
-      })
+        })
 
-      map.addLayer({
-        id: 'route-ems102-glow',
-        type: 'line',
-        source: 'route-ems102',
-        paint: {
-          'line-color': '#FF2D4A',
-          'line-width': 8,
-          'line-opacity': 0.45,
-          'line-blur': 3,
-        },
-      })
+        map.addLayer({
+          id: 'route-ems102-glow',
+          type: 'line',
+          source: 'route-ems102',
+          paint: {
+            'line-color': '#FF2D4A',
+            'line-width': 8,
+            'line-opacity': 0.45,
+            'line-blur': 3,
+          },
+        })
 
-      map.addLayer({
-        id: 'route-ems102-core',
-        type: 'line',
-        source: 'route-ems102',
-        paint: {
-          'line-color': '#FF2D4A',
-          'line-width': 3,
-          'line-opacity': 0.95,
-        },
-      })
+        map.addLayer({
+          id: 'route-ems102-core',
+          type: 'line',
+          source: 'route-ems102',
+          paint: {
+            'line-color': '#FF2D4A',
+            'line-width': 3,
+            'line-opacity': 0.95,
+          },
+        })
+      }
 
       // Hospital Center Marker
       const kemEl = document.createElement('div')
-      kemEl.className = 'px-2.5 py-1.5 rounded-lg bg-[#7C3AED] border-2 border-[#A855F7] text-white font-mono font-bold text-xs shadow-[0_0_20px_rgba(168,85,247,0.8)]'
-      kemEl.innerHTML = `🏥 ${hospitalData?.name || 'City General Trauma Center'}`
-      new mapboxgl.Marker({ element: kemEl, anchor: 'bottom' })
-        .setLngLat([72.8428, 19.0025])
-        .addTo(map)
+      kemEl.className =
+        'px-2.5 py-1.5 rounded-lg bg-[#7C3AED] border-2 border-[#A855F7] text-white font-mono font-bold text-xs shadow-[0_0_20px_rgba(168,85,247,0.8)]'
+      kemEl.innerHTML = `🏥 ${hospitalData?.name || 'Lilavati Trauma Center'}`
+      new mapboxgl.Marker({ element: kemEl, anchor: 'bottom' }).setLngLat([72.8428, 19.0025]).addTo(map)
     })
 
     mapInstanceRef.current = map
@@ -337,7 +368,7 @@ export default function HospitalPortal() {
       map.remove()
       mapInstanceRef.current = null
     }
-  }, [hospitalData?.name])
+  }, [hospitalTab, hospitalData?.name])
 
   // Filtered ER Bays
   const filteredBays = bays.filter((b) => {
@@ -353,7 +384,7 @@ export default function HospitalPortal() {
       {/* ── TOP APP HEADER ── */}
       <header className="h-16 border-b border-white/[0.08] bg-[#07090e]/95 backdrop-blur-md px-5 flex items-center justify-between z-40 shrink-0">
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => window.location.href = '/'}>
+          <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => (window.location.href = '/')}>
             <svg className="w-7 h-7 text-[#FF2D4A]" viewBox="0 0 24 12" fill="none" stroke="currentColor" strokeWidth={2.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M0 6h6l2.5-6 4 12 2.5-6h9" />
             </svg>
@@ -361,24 +392,20 @@ export default function HospitalPortal() {
               <div className="font-extrabold text-lg tracking-tight text-white flex items-center">
                 Medi<span className="text-[#FF2D4A]">Route</span>
               </div>
-              <div className="text-[10px] text-white/50 -mt-1 font-medium tracking-wide">
-                Hospital ED Command Center
-              </div>
+              <div className="text-[10px] text-white/50 -mt-1 font-medium tracking-wide">Hospital ED Command Center</div>
             </div>
           </div>
 
-          {/* Hospital Identity Badge HUD (NO FAKE IMAGES) */}
+          {/* Hospital Identity Badge HUD */}
           <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl border border-white/10 bg-white/[0.02]">
             <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-purple-600/30 to-blue-600/30 border border-purple-500/40 flex items-center justify-center text-purple-300 font-bold text-base">
               🏥
             </div>
             <div>
               <div className="text-sm font-extrabold text-white leading-tight">
-                {hospitalData?.name || 'City General Trauma Center'}
+                {hospitalData?.name || 'Lilavati Hospital & Research Centre'}
               </div>
-              <div className="text-[10px] text-white/50 leading-tight">
-                Level 1 Comprehensive Trauma Facility · Mumbai
-              </div>
+              <div className="text-[10px] text-white/50 leading-tight">Level 1 Comprehensive Trauma Facility · Mumbai</div>
               <div className="text-[8px] font-mono tracking-[0.16em] text-cyan-400 font-bold uppercase mt-0.5">
                 CARE · RESILIENCE · PRIORITY INTAKE
               </div>
@@ -447,7 +474,7 @@ export default function HospitalPortal() {
           <div>
             <div className="text-[10px] font-mono text-white/40 uppercase font-semibold">OR Suites</div>
             <div className="text-xl font-extrabold text-white tracking-tight font-mono">
-              2 <span className="text-xs font-normal text-white/40">/ 6</span>
+              {orAvailable} <span className="text-xs font-normal text-white/40">/ 6</span>
             </div>
             <div className="text-[10px] font-mono text-emerald-400">Ready</div>
           </div>
@@ -490,176 +517,429 @@ export default function HospitalPortal() {
         </div>
       </div>
 
+      {/* ── SECONDARY VIEW NAVIGATION BAR ── */}
+      <nav className="h-11 border-b border-white/[0.06] bg-[#090c15] px-5 flex items-center justify-between text-xs font-mono z-30 shrink-0">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setHospitalTab('queue')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+              hospitalTab === 'queue'
+                ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
+                : 'text-white/60 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>🚨</span>
+            <span>Inbound Queue & 20-Bay Grid</span>
+          </button>
+
+          <button
+            onClick={() => setHospitalTab('inventory')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+              hospitalTab === 'inventory'
+                ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
+                : 'text-white/60 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>🛏️</span>
+            <span>Resource & Blood Inventory</span>
+          </button>
+
+          <button
+            onClick={() => setHospitalTab('protocols')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+              hospitalTab === 'protocols'
+                ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
+                : 'text-white/60 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>📋</span>
+            <span>Trauma Team Paging & Protocols</span>
+          </button>
+
+          <button
+            onClick={() => setHospitalTab('mutualaid')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+              hospitalTab === 'mutualaid'
+                ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
+                : 'text-white/60 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>🤝</span>
+            <span>Regional Mutual Aid</span>
+          </button>
+        </div>
+      </nav>
+
       {/* ── MAIN WORKSPACE BODY ── */}
       <div className="flex-1 p-5 space-y-4 overflow-y-auto">
-        {/* Top Split: Live Radar Map (5 cols) + ER Bays Grid (7 cols) */}
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-          {/* Radar Map */}
-          <div className="xl:col-span-5 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl overflow-hidden flex flex-col h-[380px] relative">
-            <div className="p-3 border-b border-white/[0.06] flex items-center justify-between z-10 bg-[#090d16]/90">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="font-bold text-xs text-white">Inbound Trauma Radar</span>
+        {/* SUBVIEW 1: INBOUND QUEUE & ER 20-BAY GRID */}
+        {hospitalTab === 'queue' && (
+          <>
+            {/* Top Split: Live Radar Map (5 cols) + ER Bays Grid (7 cols) */}
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+              {/* Radar Map */}
+              <div className="xl:col-span-5 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl overflow-hidden flex flex-col h-[380px] relative">
+                <div className="p-3 border-b border-white/[0.06] flex items-center justify-between z-10 bg-[#090d16]/90">
+                  <div className="flex items-center gap-2">
+                    <span className="text-red-400 animate-ping w-2 h-2 rounded-full bg-red-400" />
+                    <span className="font-bold text-xs font-mono uppercase tracking-wider text-white">
+                      Live Inbound Radar
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-cyan-400">Green Corridor Active</span>
+                </div>
+
+                <div className="flex-1 relative">
+                  <div ref={mapRef} className="w-full h-full" />
+                </div>
               </div>
-              <span className="text-[10px] font-mono text-cyan-400">Live Traffic</span>
+
+              {/* ER 20-Bays Grid */}
+              <div className="xl:col-span-7 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl p-4 flex flex-col justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/[0.06]">
+                    <div className="font-bold text-sm text-white flex items-center gap-2">
+                      <span>🛏️</span>
+                      <span>Trauma & Emergency Bays Status</span>
+                    </div>
+
+                    {/* Filter Pills */}
+                    <div className="flex items-center gap-1 text-[10px] font-mono">
+                      {['all', 'occupied', 'available', 'cleaning'].map((f) => (
+                        <button
+                          key={f}
+                          onClick={() => setBedFilter(f)}
+                          className={`px-2.5 py-1 rounded-lg uppercase transition-all ${
+                            bedFilter === f ? 'bg-purple-600 text-white font-bold' : 'bg-white/5 text-white/60 hover:text-white'
+                          }`}
+                        >
+                          {f}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 20 Bays Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2.5 mt-3">
+                    {filteredBays.map((bay) => {
+                      const isIncoming = bay.status === 'incoming'
+                      const isOccupied = bay.status === 'occupied'
+                      const isAvail = bay.status === 'available'
+
+                      return (
+                        <div
+                          key={bay.id}
+                          className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                            isIncoming
+                              ? 'bg-red-950/60 border-red-500 shadow-[0_0_15px_rgba(255,45,74,0.4)] animate-pulse'
+                              : isOccupied
+                              ? 'bg-white/[0.03] border-white/10'
+                              : isAvail
+                              ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                              : 'bg-yellow-950/30 border-yellow-500/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[10px] font-mono">
+                            <span className="font-bold text-white">{bay.name}</span>
+                            {isIncoming && <span className="text-red-400 font-bold">ETA 4m</span>}
+                            {isOccupied && <span className="text-white/40">ESI {bay.esi}</span>}
+                            {isAvail && <span className="text-emerald-400">READY</span>}
+                          </div>
+
+                          <div className="my-1.5">
+                            <div className="text-[11px] font-semibold text-white leading-tight truncate">
+                              {bay.complaint}
+                            </div>
+                            <div className="text-[9px] text-white/50 leading-tight truncate">
+                              {bay.doctor}
+                            </div>
+                          </div>
+
+                          <div className="text-[9px] font-mono text-white/40 flex justify-between">
+                            <span>{bay.status.toUpperCase()}</span>
+                            {bay.time && <span>{bay.time}</span>}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11px] font-mono text-white/50">
+                  <span>Occupancy: <strong className="text-white">65%</strong></span>
+                  <span>Average Turnaround: <strong className="text-emerald-400">22 min</strong></span>
+                </div>
+              </div>
             </div>
-            <div ref={mapRef} className="w-full h-full" />
-          </div>
 
-          {/* 20-Bay ER Grid */}
-          <div className="xl:col-span-7 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl p-4 flex flex-col">
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/[0.06]">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-sm text-white">ER Bed Management Grid</span>
-                <span className="text-xs font-mono text-white/50">(20 Bays)</span>
+            {/* Bottom Row: Inbound Trauma Patient Card + Pre-Arrival Checklist */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              {/* Inbound Patient Details */}
+              <div className="lg:col-span-7 p-4 rounded-2xl bg-[#090d16]/90 border border-red-500/30 shadow-xl text-left space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-white/[0.08]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🚨</span>
+                    <div>
+                      <div className="text-xs font-mono text-red-400 font-bold uppercase">Priority Inbound Trauma</div>
+                      <div className="text-base font-extrabold text-white leading-tight">
+                        {inboundIncident?.triageData?.chiefComplaint || 'Penetrating Torso Trauma (Gunshot / Stab)'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <span className="px-3 py-1 rounded-full bg-red-600/40 border border-red-500 text-white font-mono text-xs font-bold">
+                    ESI 1 CRITICAL
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
+                    <div className="text-white/40 text-[10px]">Heart Rate</div>
+                    <div className="text-lg font-bold text-red-400 mt-0.5">
+                      {inboundIncident?.triageData?.vitals?.heartRate || 118} BPM
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
+                    <div className="text-white/40 text-[10px]">Blood Pressure</div>
+                    <div className="text-lg font-bold text-yellow-400 mt-0.5">
+                      {inboundIncident?.triageData?.vitals?.bpSystolic || 85}/{inboundIncident?.triageData?.vitals?.bpDiastolic || 55}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
+                    <div className="text-white/40 text-[10px]">SpO2</div>
+                    <div className="text-lg font-bold text-cyan-300 mt-0.5">
+                      {inboundIncident?.triageData?.vitals?.spO2 || 92}%
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
+                    <div className="text-white/40 text-[10px]">GCS Score</div>
+                    <div className="text-lg font-bold text-purple-300 mt-0.5">
+                      {inboundIncident?.triageData?.vitals?.gcs || 13}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-red-950/20 border border-red-500/20 text-xs font-mono text-white/80 leading-relaxed">
+                  <strong className="text-red-400">MediAI Clinical Note:</strong>{' '}
+                  {inboundIncident?.triageData?.aiSummary ||
+                    'Immediate surgical intervention required. Severe hemorrhage risk with secondary pneumothorax. Prepare Bay 01.'}
+                </div>
               </div>
 
-              <div className="flex items-center gap-1.5 text-[10px] font-mono">
-                {['all', 'occupied', 'available', 'cleaning'].map((f) => (
+              {/* Pre-Arrival Checklist */}
+              <div className="lg:col-span-5 p-4 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl text-left flex flex-col justify-between">
+                <div>
+                  <div className="font-bold text-sm text-white mb-2 flex items-center justify-between">
+                    <span>Pre-Arrival Readiness Protocol</span>
+                    <span className="text-xs font-mono text-emerald-400 font-semibold">Bay 01 Standby</span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {checklist.map((item) => (
+                      <div
+                        key={item.id}
+                        onClick={() => toggleChecklist(item.id)}
+                        className={`p-2 rounded-lg border text-xs font-mono flex items-center justify-between cursor-pointer transition-all ${
+                          item.done
+                            ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                            : 'bg-white/[0.02] border-white/10 text-white/70 hover:bg-white/[0.05]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span>{item.done ? '☑' : '☐'}</span>
+                          <span>{item.label}</span>
+                        </div>
+                        <span className="text-[10px] text-white/40">{item.time}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-3 flex gap-2">
                   <button
-                    key={f}
-                    onClick={() => setBedFilter(f)}
-                    className={`px-2.5 py-1 rounded-lg capitalize transition-all ${
-                      bedFilter === f
-                        ? 'bg-blue-600/30 text-cyan-300 border border-cyan-500/50 font-bold'
-                        : 'text-white/50 hover:bg-white/5'
-                    }`}
+                    onClick={handlePageTrauma}
+                    className="flex-1 py-2 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500 text-purple-300 text-xs font-mono font-bold transition-all"
                   >
-                    {f}
+                    Page Trauma Team
                   </button>
-                ))}
+                  <button
+                    onClick={handleReserveIcu}
+                    className="flex-1 py-2 rounded-xl bg-red-600/30 hover:bg-red-600/50 border border-red-500 text-red-300 text-xs font-mono font-bold transition-all"
+                  >
+                    Reserve ICU Bed
+                  </button>
+                </div>
               </div>
             </div>
+          </>
+        )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2 mt-3 flex-1 overflow-y-auto">
-              {filteredBays.map((bay) => (
-                <div
-                  key={bay.id}
-                  onClick={() => toast(`Bay ${bay.name}: ${bay.complaint || 'Available'}`, { icon: '🛏️' })}
-                  className={`p-2 rounded-xl text-left cursor-pointer transition-all border relative overflow-hidden ${
-                    bay.status === 'incoming'
-                      ? 'bg-red-950/40 border-red-500 shadow-[0_0_15px_rgba(255,45,74,0.4)] animate-pulse'
-                      : bay.status === 'occupied'
-                      ? 'bg-white/[0.02] border-white/[0.07] hover:bg-white/[0.05]'
-                      : bay.status === 'available'
-                      ? 'bg-emerald-950/20 border-emerald-500/30 hover:bg-emerald-950/40'
-                      : 'bg-yellow-950/20 border-yellow-500/30'
-                  }`}
+        {/* SUBVIEW 2: RESOURCE & BLOOD INVENTORY */}
+        {hospitalTab === 'inventory' && (
+          <div className="space-y-6 text-left">
+            <div className="pb-3 border-b border-white/[0.08]">
+              <h2 className="text-xl font-extrabold text-white">Emergency Department Resource & Critical Bank Inventory</h2>
+              <p className="text-xs text-white/50 font-mono mt-0.5">
+                Real-time inventory levels synchronized across the Mumbai Trauma Network.
+              </p>
+            </div>
+
+            {/* Blood Bank Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-red-500/40 shadow-xl">
+                <div className="text-xs font-mono text-red-400 font-bold uppercase">Blood Bank · O-Negative (Universal)</div>
+                <div className="text-3xl font-extrabold text-white font-mono mt-1">{bloodBank.oNeg} Units</div>
+                <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Adequate for 4 Major Polytraumas</div>
+                <button
+                  onClick={() => {
+                    setBloodBank((b) => ({ ...b, oNeg: b.oNeg + 4 }))
+                    toast.success('Requested 4 Units O-Neg from Regional Blood Center')
+                  }}
+                  className="mt-3 w-full py-1.5 rounded-lg bg-red-600/30 hover:bg-red-600/50 border border-red-500/40 text-red-300 text-xs font-mono"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-white">{bay.name}</span>
-                    {bay.esi && (
-                      <span className="text-[8px] font-mono px-1 rounded bg-red-600/60 text-white font-bold">
-                        ESI {bay.esi}
-                      </span>
-                    )}
+                  Order +4 Units
+                </button>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/10 shadow-xl">
+                <div className="text-xs font-mono text-white/50 uppercase">Blood Bank · Fresh Frozen Plasma</div>
+                <div className="text-3xl font-extrabold text-white font-mono mt-1">{bloodBank.plasma} Units</div>
+                <div className="text-[10px] text-white/40 font-mono mt-0.5">Massive Transfusion Protocol ready</div>
+                <button
+                  onClick={() => {
+                    setBloodBank((b) => ({ ...b, plasma: b.plasma + 6 }))
+                    toast.success('Thawed 6 Units FFP for trauma surgical reserve')
+                  }}
+                  className="mt-3 w-full py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-mono"
+                >
+                  Thaw +6 Units
+                </button>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/10 shadow-xl">
+                <div className="text-xs font-mono text-cyan-400 uppercase">Mechanical Ventilators</div>
+                <div className="text-3xl font-extrabold text-white font-mono mt-1">
+                  {ventilatorCount} <span className="text-xs text-white/40 font-normal">/ 16 Active</span>
+                </div>
+                <div className="text-[10px] text-cyan-300 font-mono mt-0.5">2 Available in Resuscitation Bay</div>
+                <button
+                  onClick={() => {
+                    setVentilatorCount((v) => Math.max(0, v - 1))
+                    toast.success('Deployed portable ventilator to Bay 01')
+                  }}
+                  className="mt-3 w-full py-1.5 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500/40 text-cyan-300 text-xs font-mono"
+                >
+                  Deploy Ventilator
+                </button>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/10 shadow-xl">
+                <div className="text-xs font-mono text-purple-400 uppercase">Operating Rooms (Surgical Suites)</div>
+                <div className="text-3xl font-extrabold text-white font-mono mt-1">
+                  {orAvailable} <span className="text-xs text-white/40 font-normal">/ 6 Ready</span>
+                </div>
+                <div className="text-[10px] text-purple-300 font-mono mt-0.5">Suite 02 sterile and cleared</div>
+                <button
+                  onClick={() => {
+                    setOrAvailable((o) => Math.max(0, o - 1))
+                    toast.success('OR Suite 02 locked for incoming emergency laparotomy')
+                  }}
+                  className="mt-3 w-full py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-300 text-xs font-mono"
+                >
+                  Lock OR for Inbound
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SUBVIEW 3: PROTOCOLS */}
+        {hospitalTab === 'protocols' && (
+          <div className="space-y-6 text-left">
+            <div className="pb-3 border-b border-white/[0.08]">
+              <h2 className="text-xl font-extrabold text-white">Emergency Triage & Trauma Protocols</h2>
+              <p className="text-xs text-white/50 font-mono mt-0.5">
+                Standard operating procedures for Level 1 Trauma Intake and Mass Casualty Scenarios.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+              <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-red-500/30 space-y-2">
+                <div className="text-red-400 font-bold text-sm uppercase">Code Red: Polytrauma Activation</div>
+                <p className="text-white/70 leading-relaxed font-sans">
+                  Activated for penetrating trauma, blast injuries, or high-speed motor vehicle collisions with hemodynamically unstable vitals.
+                </p>
+                <button onClick={handlePageTrauma} className="w-full py-2 rounded-lg bg-red-600/30 border border-red-500 text-red-300 font-bold">
+                  Broadcast Code Red
+                </button>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-cyan-500/30 space-y-2">
+                <div className="text-cyan-400 font-bold text-sm uppercase">Code Stroke: Neuro Priority</div>
+                <p className="text-white/70 leading-relaxed font-sans">
+                  Immediate non-contrast head CT within 15 minutes of arrival. Direct assessment for IV thrombolysis and mechanical thrombectomy.
+                </p>
+                <button onClick={handleNotifyRadiology} className="w-full py-2 rounded-lg bg-cyan-600/30 border border-cyan-500 text-cyan-300 font-bold">
+                  Clear CT Scan Suite
+                </button>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-purple-500/30 space-y-2">
+                <div className="text-purple-400 font-bold text-sm uppercase">Code STEMI: Cardiac Cath Lab</div>
+                <p className="text-white/70 leading-relaxed font-sans">
+                  Target door-to-balloon time &lt; 60 minutes. Direct bypass of general ER to Interventional Cardiology Suite.
+                </p>
+                <button
+                  onClick={() => toast.success('Interventional Cardiology Cath Lab team activated!')}
+                  className="w-full py-2 rounded-lg bg-purple-600/30 border border-purple-500 text-purple-300 font-bold"
+                >
+                  Activate Cath Lab
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SUBVIEW 4: MUTUAL AID */}
+        {hospitalTab === 'mutualaid' && (
+          <div className="space-y-6 text-left">
+            <div className="pb-3 border-b border-white/[0.08]">
+              <h2 className="text-xl font-extrabold text-white">Regional Hospital Mutual Aid & Diversion Network</h2>
+              <p className="text-xs text-white/50 font-mono mt-0.5">
+                Real-time bed availability and overflow diversion status across neighboring trauma facilities in Mumbai.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {sisterHospitals.map((sister) => (
+                <div key={sister.id} className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/10 flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-white text-sm">{sister.name}</div>
+                    <div className="text-xs font-mono text-white/50 mt-1">
+                      ICU: {sister.icu} · Trauma Bays: {sister.trauma} · ETA: {sister.eta}
+                    </div>
                   </div>
-                  <div className="text-[10px] text-white/80 font-medium truncate mt-1">
-                    {bay.complaint}
-                  </div>
-                  <div className="text-[9px] text-white/40 font-mono">
-                    {bay.status === 'incoming' ? `ETA ${bay.eta}` : bay.status}
+
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                        sister.status === 'NORMAL' ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300' : 'bg-red-950/60 border border-red-500/40 text-red-300'
+                      }`}
+                    >
+                      {sister.status}
+                    </span>
+                    <button
+                      onClick={() => toast.success(`Mutual aid protocol linked with ${sister.name}`)}
+                      className="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-mono text-white border border-white/10"
+                    >
+                      Coordinate
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        </div>
-
-        {/* Bottom Split: Inbound Patient Card + Pre-Arrival Checklist */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {/* Inbound Patient Details */}
-          <div className="lg:col-span-5 p-4 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl text-left flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
-                <div className="text-xs font-bold text-white">Inbound Patient Details</div>
-                <span className="px-2 py-0.5 rounded bg-red-600 text-white font-mono text-[9px] font-bold">
-                  ESI {inboundIncident?.triageData?.esiLevel || 1}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3 mt-3">
-                <div className="w-10 h-10 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-lg shrink-0">
-                  👤
-                </div>
-                <div>
-                  <div className="text-xs text-white/50 font-mono">
-                    {inboundIncident?.patientDetails?.name || 'Citizen Patient'} · 🩸 {inboundIncident?.patientDetails?.bloodType || 'O+'}
-                  </div>
-                  <div className="text-sm font-extrabold text-white">
-                    {inboundIncident?.triageData?.chiefComplaint || 'Penetrating Chest Trauma'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-3 p-2.5 rounded-lg bg-black/40 border border-white/[0.06] font-mono text-xs text-white/80 space-y-1">
-                <div>AI Summary: {inboundIncident?.triageData?.aiSummary || 'Immediate emergency surgical intervention prepared.'}</div>
-                <div className="text-[10px] text-emerald-400">Unit: {inboundIncident?.assignedAmbulance?.vehicleNumber || 'MH-AMB-002'} en route</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 mt-4 pt-3 border-t border-white/10">
-              <button
-                onClick={handlePageTrauma}
-                className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow transition-all"
-              >
-                Page Trauma Team
-              </button>
-              <button
-                onClick={handleNotifyRadiology}
-                className="flex-1 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-all"
-              >
-                Clear CT Suite
-              </button>
-            </div>
-          </div>
-
-          {/* Pre-Arrival Preparation Checklist */}
-          <div className="lg:col-span-7 p-4 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl text-left flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
-                <div className="text-xs font-bold text-white">Pre-Arrival Trauma Checklist</div>
-                <span className="text-[10px] font-mono text-emerald-400">Synced with Paramedic Lead</span>
-              </div>
-
-              <div className="space-y-2 mt-3">
-                {checklist.map((c) => (
-                  <div
-                    key={c.id}
-                    onClick={() => toggleChecklist(c.id)}
-                    className="flex items-center justify-between p-2 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 cursor-pointer transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-bold ${
-                        c.done ? 'bg-emerald-500 text-black' : 'border border-white/30 text-white/40'
-                      }`}>
-                        {c.done ? '✓' : ''}
-                      </span>
-                      <span className={`text-xs ${c.done ? 'text-white/90' : 'text-white/60'}`}>
-                        {c.label}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-white/40">{c.time}</span>
-                      {c.canReserve && !c.done && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleReserveIcu()
-                          }}
-                          className="px-2 py-0.5 rounded bg-purple-600/30 border border-purple-400 text-purple-200 text-[10px] font-bold"
-                        >
-                          Reserve ICU Bed
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   )
