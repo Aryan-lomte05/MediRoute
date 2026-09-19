@@ -1,0 +1,219 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: #0a0a0f;
+    color: #ffffff;
+    font-family: 'Inter', system-ui, sans-serif;
+    overflow-x: hidden;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0a0a0f;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #FF2D4A;
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  /* Glassmorphism card */
+  .glass-card {
+    @apply bg-white/[0.03] backdrop-blur-xl border border-white/[0.06] rounded-2xl;
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300 hover:bg-white/[0.06] hover:border-white/10 hover:shadow-lg hover:shadow-emergency/10;
+  }
+
+  /* Glow effects */
+  .glow-red {
+    box-shadow: 0 0 20px rgba(255, 45, 74, 0.4), 0 0 60px rgba(255, 45, 74, 0.15);
+  }
+  .glow-cyan {
+    box-shadow: 0 0 20px rgba(0, 245, 255, 0.4), 0 0 60px rgba(0, 245, 255, 0.15);
+  }
+  .glow-purple {
+    box-shadow: 0 0 20px rgba(124, 58, 237, 0.4), 0 0 60px rgba(124, 58, 237, 0.15);
+  }
+
+  /* Text glow */
+  .text-glow-red {
+    text-shadow: 0 0 20px rgba(255, 45, 74, 0.8), 0 0 40px rgba(255, 45, 74, 0.4);
+  }
+  .text-glow-cyan {
+    text-shadow: 0 0 20px rgba(0, 245, 255, 0.8), 0 0 40px rgba(0, 245, 255, 0.4);
+  }
+
+  /* Neon button */
+  .btn-emergency {
+    @apply relative inline-flex items-center gap-2 px-8 py-4 bg-emergency font-display font-semibold text-white text-lg rounded-xl
+           transition-all duration-300 hover:scale-105 active:scale-95 overflow-hidden;
+    box-shadow: 0 0 30px rgba(255, 45, 74, 0.5), 0 0 60px rgba(255, 45, 74, 0.2);
+  }
+  .btn-emergency::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .btn-emergency:hover::before { opacity: 1; }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-6 py-3 border border-white/20 rounded-xl
+           font-medium text-white/80 transition-all duration-300
+           hover:border-cyber hover:text-cyber hover:bg-cyber/5;
+  }
+
+  /* Portal sidebar */
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
+           text-white/60 hover:text-white hover:bg-white/[0.05] cursor-pointer;
+  }
+  .sidebar-item.active {
+    @apply text-white bg-emergency/15 border border-emergency/30 text-emergency;
+  }
+
+  /* Status badge */
+  .badge-esi-1 { @apply bg-red-500/20 text-red-400 border border-red-500/40; }
+  .badge-esi-2 { @apply bg-orange-500/20 text-orange-400 border border-orange-500/40; }
+  .badge-esi-3 { @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/40; }
+  .badge-esi-4 { @apply bg-green-500/20 text-green-400 border border-green-500/40; }
+  .badge-esi-5 { @apply bg-blue-500/20 text-blue-400 border border-blue-500/40; }
+
+  /* Pulsing dot indicator */
+  .pulse-dot {
+    @apply relative inline-flex h-3 w-3;
+  }
+  .pulse-dot::before {
+    content: '';
+    @apply absolute inline-flex h-full w-full rounded-full bg-current opacity-75 animate-ping;
+  }
+  .pulse-dot::after {
+    content: '';
+    @apply relative inline-flex rounded-full h-3 w-3 bg-current;
+  }
+
+  /* Scan line overlay */
+  .scan-overlay::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(transparent 50%, rgba(0, 245, 255, 0.01) 50%);
+    background-size: 100% 4px;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Stats metric card */
+  .metric-card {
+    @apply glass-card p-6 relative overflow-hidden;
+  }
+  .metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #FF2D4A, transparent);
+  }
+
+  /* Map container */
+  .map-container {
+    @apply relative rounded-2xl overflow-hidden;
+    border: 1px solid rgba(255, 45, 74, 0.2);
+    box-shadow: 0 0 40px rgba(255, 45, 74, 0.1), inset 0 0 40px rgba(0,0,0,0.5);
+  }
+
+  /* Animated route line */
+  .route-animated {
+    stroke-dasharray: 8 4;
+    animation: dash 1.5s linear infinite;
+  }
+
+  /* Input */
+  .input-dark {
+    @apply w-full bg-surface-elevated border border-surface-border rounded-xl px-4 py-3
+           text-white placeholder-white/30 transition-all duration-200 outline-none
+           focus:border-emergency/60 focus:ring-2 focus:ring-emergency/20;
+  }
+}
+
+/* Mapbox overrides */
+.mapboxgl-ctrl-logo { display: none !important; }
+.mapboxgl-ctrl-attrib { display: none !important; }
+.mapboxgl-popup-content {
+  background: #0f0f1a !important;
+  border: 1px solid #1e1e35 !important;
+  border-radius: 12px !important;
+  color: white !important;
+  padding: 12px 16px !important;
+}
+.mapboxgl-popup-tip { border-top-color: #1e1e35 !important; }
+
+/* Three.js canvas */
+canvas { display: block; }
+
+/* Custom animations */
+@keyframes ambulance-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes route-flow {
+  0% { stroke-dashoffset: 200; }
+  100% { stroke-dashoffset: 0; }
+}
+
+/* Hero gradient text */
+.gradient-text-emergency {
+  background: linear-gradient(135deg, #FF2D4A 0%, #FF6B7A 50%, #00F5FF 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-cyber {
+  background: linear-gradient(135deg, #00F5FF 0%, #7C3AED 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ESI level colors */
+.esi-1 { color: #FF2D4A; }
+.esi-2 { color: #FF8C00; }
+.esi-3 { color: #FFD700; }
+.esi-4 { color: #00C851; }
+.esi-5 { color: #007bff; }
+
+/* Noise texture overlay */
+.noise-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 0;
+}

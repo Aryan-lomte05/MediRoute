@@ -1,0 +1,35 @@
+{
+  "name": "MediRoute — AI Emergency Response",
+  "short_name": "MediRoute",
+  "description": "Next-Gen Intelligent Emergency Response & Dynamic Hospital Allocation System",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0a0f",
+  "theme_color": "#FF2D4A",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["medical", "emergency", "productivity"],
+  "shortcuts": [
+    {
+      "name": "SOS Emergency",
+      "short_name": "SOS",
+      "description": "Trigger instant emergency intake",
+      "url": "/patient",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Paramedic Field HUD",
+      "short_name": "Paramedic",
+      "description": "Paramedic live dispatch navigation",
+      "url": "/paramedic",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    }
+  ]
+}
