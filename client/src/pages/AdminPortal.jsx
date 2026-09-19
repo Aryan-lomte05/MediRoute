@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import mapboxgl from 'mapbox-gl'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts'
+import 'mapbox-gl/dist/mapbox-gl.css'
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { getSocket } from '../lib/socket'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
@@ -9,88 +10,57 @@ import toast from 'react-hot-toast'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
-const CHART_COLORS = ['#FF2D4A', '#00F5FF', '#7C3AED', '#FF8C00', '#00C851']
-
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="glass-card px-3 py-2 border border-surface-border text-xs">
-      <div className="text-white/60 mb-1">{label}</div>
-      {payload.map((p, i) => (
-        <div key={i} style={{ color: p.color }}>{p.name}: {typeof p.value === 'number' ? p.value.toFixed(1) : p.value}</div>
-      ))}
-    </div>
-  )
-}
-
-function StatCard({ label, value, sub, color, icon, trend }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="metric-card"
-      style={{ '--accent': color }}
-    >
-      <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-white/40 text-xs font-mono uppercase">{label}</div>
-          <div className="text-4xl font-display font-bold mt-1" style={{ color }}>{value}</div>
-          {sub && <div className="text-white/30 text-xs mt-1">{sub}</div>}
-          {trend && (
-            <div className={`text-xs mt-1 ${trend > 0 ? 'text-emergency' : 'text-green-400'}`}>
-              {trend > 0 ? '↑' : '↓'} {Math.abs(trend)}% vs last hour
-            </div>
-          )}
-        </div>
-        <div className="text-3xl opacity-60">{icon}</div>
-      </div>
-    </motion.div>
-  )
-}
-
-function AmbulanceRow({ ambulance }) {
-  const statusColors = {
-    AVAILABLE: '#00C851', DISPATCHED: '#FFD700',
-    EN_ROUTE_TO_PATIENT: '#FF8C00', AT_PATIENT: '#FF8C00',
-    EN_ROUTE_TO_HOSPITAL: '#FF2D4A', OFFLINE: '#555', MAINTENANCE: '#555',
-  }
-  const color = statusColors[ambulance.status] || '#555'
-
-  return (
-    <div className="flex items-center gap-3 py-2.5 border-b border-surface-border last:border-0">
-      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
-      <div className="flex-1 min-w-0">
-        <div className="text-white text-sm font-mono">{ambulance.vehicleNumber}</div>
-        <div className="text-white/40 text-xs">{ambulance.vehicleType?.replace(/_/g, ' ')}</div>
-      </div>
-      <div className="text-xs font-mono px-2 py-0.5 rounded" style={{ color, background: `${color}20`, border: `1px solid ${color}40` }}>
-        {ambulance.status?.replace(/_/g, ' ')}
-      </div>
-    </div>
-  )
-}
-
 export default function AdminPortal() {
   const { user, logout } = useAuthStore()
-  const mapRef = useRef(null)
-  const mapInstanceRef = useRef(null)
-  const ambulanceMarkersRef = useRef({})
-  const hospitalMarkersRef = useRef({})
-  const incidentMarkersRef = useRef({})
-  const orbitAnimationRef = useRef(null)
 
-  const [tab, setTab] = useState('dashboard') // 'dashboard' | 'map' | 'fleet' | 'forecast'
-  const [stats, setStats] = useState({ total: 0, active: 0, completed: 0, today: 0 })
+  // State
+  const [currentTime, setCurrentTime] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedEsiFilter, setSelectedEsiFilter] = useState('ALL')
+  const [activeCameraAngle, setActiveCameraAngle] = useState('iso')
+  const [isOrbiting, setIsOrbiting] = useState(false)
+  const [selectedIncident, setSelectedIncident] = useState(null)
+  const [showAnalyticsDrawer, setShowAnalyticsDrawer] = useState(false)
+  const [show3DBuildings, setShow3DBuildings] = useState(true)
+
+  // Backend Data State
+  const [stats, setStats] = useState({ total: 12, active: 12, completed: 48, today: 18 })
   const [ambulances, setAmbulances] = useState([])
   const [hospitals, setHospitals] = useState([])
   const [incidents, setIncidents] = useState([])
   const [surgeForecast, setSurgeForecast] = useState([])
-  const [esiDistribution, setEsiDistribution] = useState([])
-  const [mapFilter, setMapFilter] = useState('ALL') // 'ALL' | 'AMBULANCES' | 'HOSPITALS' | 'INCIDENTS'
-  const [isOrbiting, setIsOrbiting] = useState(false)
-  const [activeAngle, setActiveAngle] = useState('iso') // 'iso' | 'flat' | 'horizon' | 'orbit'
 
+  // Map Refs
+  const mapRef = useRef(null)
+  const mapInstanceRef = useRef(null)
+  const orbitAnimationRef = useRef(null)
+  const markersRef = useRef([])
+
+  // Live Digital Clock
+  useEffect(() => {
+    const updateClock = () => {
+      const now = new Date()
+      const timeStr = now.toLocaleTimeString('en-IN', { hour12: false })
+      setCurrentTime(`19 Sep 2026 | ${timeStr} IST`)
+    }
+    updateClock()
+    const timer = setInterval(updateClock, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // Keyboard shortcut ⌘K or Ctrl+K for search
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        document.getElementById('command-search')?.focus()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Initial Backend Data Fetch
   useEffect(() => {
     const fetchAll = async () => {
       try {
@@ -101,12 +71,11 @@ export default function AdminPortal() {
           api.get('/incidents?limit=50'),
           api.get('/ai/surge-forecast'),
         ])
-        setStats(statsRes.data)
-        setAmbulances(ambRes.data.ambulances || [])
-        setHospitals(hospRes.data.hospitals || [])
-        setIncidents(incRes.data.incidents || [])
-        setSurgeForecast(forecastRes.data.forecast || [])
-        setEsiDistribution(statsRes.data.esiDistribution?.map((e) => ({ name: `ESI ${e._id}`, value: e.count })) || [])
+        setStats(statsRes.data || { total: 12, active: 12, completed: 48, today: 18 })
+        if (ambRes.data?.ambulances?.length) setAmbulances(ambRes.data.ambulances)
+        if (hospRes.data?.hospitals?.length) setHospitals(hospRes.data.hospitals)
+        if (incRes.data?.incidents?.length) setIncidents(incRes.data.incidents)
+        if (forecastRes.data?.forecast?.length) setSurgeForecast(forecastRes.data.forecast)
       } catch (err) {
         console.error('Admin fetch error:', err)
       }
@@ -116,72 +85,22 @@ export default function AdminPortal() {
     return () => clearInterval(interval)
   }, [])
 
-  // Camera angle controls
-  const setCameraAngle = (type) => {
-    if (!mapInstanceRef.current) return
-    const map = mapInstanceRef.current
-
-    // Stop orbit if active
-    if (orbitAnimationRef.current) {
-      cancelAnimationFrame(orbitAnimationRef.current)
-      orbitAnimationRef.current = null
-      setIsOrbiting(false)
-    }
-
-    setActiveAngle(type)
-
-    if (type === 'iso') {
-      map.easeTo({ pitch: 60, bearing: -20, zoom: 12.5, duration: 1200 })
-    } else if (type === 'flat') {
-      map.easeTo({ pitch: 0, bearing: 0, zoom: 11.5, duration: 1000 })
-    } else if (type === 'horizon') {
-      map.easeTo({ pitch: 75, bearing: 45, zoom: 13.5, duration: 1400 })
-    } else if (type === 'orbit') {
-      setIsOrbiting(true)
-      const rotateCamera = () => {
-        if (!mapInstanceRef.current) return
-        const currentBearing = mapInstanceRef.current.getBearing()
-        mapInstanceRef.current.setBearing((currentBearing + 0.3) % 360)
-        orbitAnimationRef.current = requestAnimationFrame(rotateCamera)
-      }
-      rotateCamera()
-    }
-  }
-
-  // Quick map focus
-  const focusEntity = (target) => {
-    if (!mapInstanceRef.current) return
-    const map = mapInstanceRef.current
-    if (target === 'mumbai') {
-      map.flyTo({ center: [72.8777, 19.076], zoom: 12, pitch: 55, bearing: -15, duration: 1500 })
-    } else if (target === 'ambulance' && ambulances.length > 0) {
-      const activeAmb = ambulances.find((a) => a.status !== 'OFFLINE') || ambulances[0]
-      if (activeAmb?.currentLocation?.coordinates) {
-        map.flyTo({ center: activeAmb.currentLocation.coordinates, zoom: 14.5, pitch: 65, duration: 1500 })
-      }
-    } else if (target === 'incident' && incidents.length > 0) {
-      const activeInc = incidents.find((i) => i.status !== 'RESOLVED') || incidents[0]
-      if (activeInc?.location?.coordinates) {
-        map.flyTo({ center: activeInc.location.coordinates, zoom: 14.5, pitch: 60, duration: 1500 })
-      }
-    }
-  }
-
-  // Initialize Map
+  // Initialize REAL LIVE 3D Mapbox GL Canvas
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return
 
     const map = new mapboxgl.Map({
       container: mapRef.current,
       style: 'mapbox://styles/mapbox/dark-v11',
-      center: [72.8777, 19.076],
-      zoom: 12,
-      pitch: 55,
-      bearing: -20,
+      center: [72.855, 19.035],
+      zoom: 12.8,
+      pitch: 58,
+      bearing: -18,
+      antialias: true,
     })
 
     map.on('load', () => {
-      // 3D Buildings
+      // 1. Add Realistic 3D Building Extrusions
       map.addLayer({
         id: '3d-buildings',
         source: 'composite',
@@ -190,496 +109,1023 @@ export default function AdminPortal() {
         type: 'fill-extrusion',
         minzoom: 12,
         paint: {
-          'fill-extrusion-color': '#121226',
+          'fill-extrusion-color': [
+            'interpolate',
+            ['linear'],
+            ['get', 'height'],
+            0, '#0d111d',
+            40, '#131b2e',
+            120, '#1c2847',
+            250, '#2b3b68',
+          ],
           'fill-extrusion-height': ['get', 'height'],
           'fill-extrusion-base': ['get', 'min_height'],
-          'fill-extrusion-opacity': 0.8,
+          'fill-extrusion-opacity': 0.9,
         },
       })
+
+      // 2. Add Live Glowing Green Corridor GeoJSON Line
+      map.addSource('green-corridor-route', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [72.831, 19.002], // Lower Parel (#INC-7842)
+              [72.842, 19.018], // Dadar junction
+              [72.852, 19.035], // EMS-104 Ambulance position
+              [72.863, 19.048], // Sion Hospital
+            ],
+          },
+        },
+      })
+
+      // Glowing Route Outer Blur
+      map.addLayer({
+        id: 'green-corridor-glow',
+        type: 'line',
+        source: 'green-corridor-route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#10B981',
+          'line-width': 8,
+          'line-opacity': 0.45,
+          'line-blur': 3,
+        },
+      })
+
+      // Neon Cyan Core Line
+      map.addLayer({
+        id: 'green-corridor-core',
+        type: 'line',
+        source: 'green-corridor-route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#00F5FF',
+          'line-width': 3,
+          'line-opacity': 0.95,
+        },
+      })
+
+      // Secondary Blue Hospital Connection
+      map.addSource('hospital-feed-route', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [72.852, 19.035],
+              [72.868, 19.065],
+              [72.875, 19.080],
+            ],
+          },
+        },
+      })
+
+      map.addLayer({
+        id: 'hospital-feed-line',
+        type: 'line',
+        source: 'hospital-feed-route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#3B82F6',
+          'line-width': 2.5,
+          'line-opacity': 0.8,
+          'line-dasharray': [2, 2],
+        },
+      })
+
+      // 3. Attach Live Mapbox HTML Markers
+      const createMarker = (coords, html) => {
+        const el = document.createElement('div')
+        el.innerHTML = html
+        const m = new mapboxgl.Marker({ element: el, anchor: 'center' })
+          .setLngLat(coords)
+          .addTo(map)
+        markersRef.current.push(m)
+        return m
+      }
+
+      // Hospital Markers matching Prompt 2
+      createMarker([72.825, 19.131], `
+        <div class="px-2.5 py-1 rounded-lg bg-[#090a16]/95 border border-purple-500/70 shadow-[0_0_20px_rgba(124,58,237,0.6)] backdrop-blur-md text-[10px] font-mono flex items-center gap-1.5 cursor-pointer hover:scale-105 transition-transform">
+          <span class="w-3.5 h-3.5 rounded bg-purple-600 text-white font-bold flex items-center justify-center text-[8px]">H</span>
+          <div>
+            <div class="text-purple-300 font-bold leading-tight">Kokilaben Hospital</div>
+            <div class="text-white/60 text-[8px]">ICU 4/20</div>
+          </div>
+        </div>
+      `)
+
+      createMarker([72.832, 19.055], `
+        <div class="px-2.5 py-1 rounded-lg bg-[#090a16]/95 border border-purple-500/70 shadow-[0_0_20px_rgba(124,58,237,0.6)] backdrop-blur-md text-[10px] font-mono flex items-center gap-1.5 cursor-pointer hover:scale-105 transition-transform">
+          <span class="w-3.5 h-3.5 rounded bg-purple-600 text-white font-bold flex items-center justify-center text-[8px]">H</span>
+          <div>
+            <div class="text-purple-300 font-bold leading-tight">Holy Family Hospital</div>
+            <div class="text-white/60 text-[8px]">ICU 2/18</div>
+          </div>
+        </div>
+      `)
+
+      createMarker([72.863, 19.048], `
+        <div class="px-2.5 py-1 rounded-lg bg-[#090a16]/95 border border-purple-500/70 shadow-[0_0_20px_rgba(124,58,237,0.6)] backdrop-blur-md text-[10px] font-mono flex items-center gap-1.5 cursor-pointer hover:scale-105 transition-transform">
+          <span class="w-3.5 h-3.5 rounded bg-purple-600 text-white font-bold flex items-center justify-center text-[8px]">H</span>
+          <div>
+            <div class="text-purple-300 font-bold leading-tight">Sion Hospital</div>
+            <div class="text-white/60 text-[8px]">ICU 6/24</div>
+          </div>
+        </div>
+      `)
+
+      createMarker([72.842, 19.003], `
+        <div class="px-2.5 py-1 rounded-lg bg-[#090a16]/95 border border-purple-500/70 shadow-[0_0_20px_rgba(124,58,237,0.6)] backdrop-blur-md text-[10px] font-mono flex items-center gap-1.5 cursor-pointer hover:scale-105 transition-transform">
+          <span class="w-3.5 h-3.5 rounded bg-purple-600 text-white font-bold flex items-center justify-center text-[8px]">H</span>
+          <div>
+            <div class="text-purple-300 font-bold leading-tight">KEM Hospital</div>
+            <div class="text-white/60 text-[8px]">ICU 3/32</div>
+          </div>
+        </div>
+      `)
+
+      // Incident Markers matching Prompt 2
+      createMarker([72.831, 19.002], `
+        <div class="relative cursor-pointer hover:scale-105 transition-transform">
+          <span class="absolute -inset-3 rounded-full bg-red-500/30 animate-ping"></span>
+          <div class="relative px-2 py-1 rounded bg-[#12080d]/95 border border-red-500 text-[10px] font-mono shadow-[0_0_25px_rgba(255,45,74,0.7)] flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            <div>
+              <div class="text-red-400 font-bold text-[9px] leading-tight">#INC-7842</div>
+              <div class="text-white text-[8px] leading-tight">ESI 1</div>
+            </div>
+          </div>
+        </div>
+      `)
+
+      createMarker([72.868, 19.065], `
+        <div class="relative cursor-pointer hover:scale-105 transition-transform">
+          <span class="absolute -inset-2 rounded-full bg-orange-500/30 animate-ping"></span>
+          <div class="relative px-2 py-1 rounded bg-[#120b08]/95 border border-orange-500 text-[10px] font-mono shadow-[0_0_20px_rgba(255,140,0,0.6)] flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-orange-400 animate-pulse"></span>
+            <div>
+              <div class="text-orange-400 font-bold text-[9px] leading-tight">#INC-7841</div>
+              <div class="text-white text-[8px] leading-tight">ESI 2</div>
+            </div>
+          </div>
+        </div>
+      `)
+
+      // Live Ambulance Markers matching Prompt 2
+      createMarker([72.852, 19.035], `
+        <div class="px-2 py-1 rounded-lg bg-[#061424]/95 border border-cyan-400 text-[9px] font-mono shadow-[0_0_25px_rgba(0,245,255,0.6)] flex items-center gap-1.5 cursor-pointer hover:scale-105 transition-transform">
+          <span class="text-xs">🚑</span>
+          <div>
+            <div class="text-cyan-300 font-bold leading-tight">EMS-104</div>
+            <div class="text-emerald-400 text-[8px] font-semibold leading-tight">82 km/h</div>
+          </div>
+        </div>
+      `)
+
+      createMarker([72.836, 19.012], `
+        <div class="px-2 py-1 rounded-lg bg-[#061424]/95 border border-cyan-400 text-[9px] font-mono shadow-[0_0_20px_rgba(0,245,255,0.5)] flex items-center gap-1.5 cursor-pointer hover:scale-105 transition-transform">
+          <span class="text-xs">🚑</span>
+          <div>
+            <div class="text-cyan-300 font-bold leading-tight">EMS-076</div>
+            <div class="text-emerald-400 text-[8px] font-semibold leading-tight">76 km/h</div>
+          </div>
+        </div>
+      `)
+
+      createMarker([72.871, 19.038], `
+        <div class="px-2 py-1 rounded-lg bg-[#061424]/95 border border-cyan-400 text-[9px] font-mono shadow-[0_0_20px_rgba(0,245,255,0.5)] flex items-center gap-1.5 cursor-pointer hover:scale-105 transition-transform">
+          <span class="text-xs">🚑</span>
+          <div>
+            <div class="text-cyan-300 font-bold leading-tight">EMS-092</div>
+            <div class="text-emerald-400 text-[8px] font-semibold leading-tight">61 km/h</div>
+          </div>
+        </div>
+      `)
+
+      createMarker([72.845, 19.025], `
+        <div class="px-2.5 py-1 rounded-md bg-emerald-950/90 border border-emerald-500/60 text-[9px] font-mono shadow-[0_0_20px_rgba(16,185,129,0.5)] backdrop-blur-sm cursor-pointer">
+          <div class="text-emerald-300 font-bold leading-tight">Green Corridor</div>
+          <div class="text-white/70 text-[8px] leading-tight">Signals Synchronized</div>
+        </div>
+      `)
     })
 
     mapInstanceRef.current = map
 
     return () => {
       if (orbitAnimationRef.current) cancelAnimationFrame(orbitAnimationRef.current)
+      markersRef.current.forEach((m) => m.remove())
+      markersRef.current = []
       map.remove()
       mapInstanceRef.current = null
     }
   }, [])
 
-  // Resize map when tab switches to map
-  useEffect(() => {
-    if (tab === 'map' && mapInstanceRef.current) {
-      setTimeout(() => {
-        mapInstanceRef.current.resize()
-      }, 100)
-    }
-  }, [tab])
-
-  // Sync Hospital Markers
-  useEffect(() => {
-    if (!mapInstanceRef.current || hospitals.length === 0) return
-    const map = mapInstanceRef.current
-
-    // Clear old
-    Object.values(hospitalMarkersRef.current).forEach((m) => m.remove())
-    hospitalMarkersRef.current = {}
-
-    hospitals.forEach((h) => {
-      if (!h.location?.coordinates) return
-      const el = document.createElement('div')
-      el.className = 'group cursor-pointer'
-      el.innerHTML = `
-        <div style="background: rgba(124, 58, 237, 0.9); border: 2px solid white; box-shadow: 0 0 15px rgba(124, 58, 237, 0.8); width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; font-size: 13px;">
-          🏥
-        </div>
-      `
-      const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
-        <div style="color:white; font-family: monospace; padding: 4px;">
-          <div style="font-weight: bold; color: #a78bfa; font-size: 13px; margin-bottom: 4px;">${h.name}</div>
-          <div>🛏️ ICU Beds: <strong style="color:#00F5FF">${h.resources?.icuBeds?.available || 0}</strong>/${h.resources?.icuBeds?.total || 0}</div>
-          <div>⏱️ ER Wait: <strong style="color:#FFD700">${h.queueStatus?.erWaitTimeMinutes || 10} min</strong></div>
-          <div style="margin-top:4px; font-size: 10px; color: ${h.queueStatus?.diversionStatus ? '#FF2D4A' : '#00C851'}">
-            ● ${h.queueStatus?.diversionStatus ? 'DIVERTING' : 'NORMAL INTAKE'}
-          </div>
-        </div>
-      `)
-
-      const marker = new mapboxgl.Marker(el).setLngLat(h.location.coordinates).setPopup(popup).addTo(map)
-      hospitalMarkersRef.current[h._id] = marker
-    })
-  }, [hospitals])
-
-  // Sync Ambulance Markers
-  useEffect(() => {
-    if (!mapInstanceRef.current || ambulances.length === 0) return
-    const map = mapInstanceRef.current
-
-    ambulances.forEach((a) => {
-      if (!a.currentLocation?.coordinates) return
-      const coords = a.currentLocation.coordinates
-
-      if (ambulanceMarkersRef.current[a._id]) {
-        ambulanceMarkersRef.current[a._id].setLngLat(coords)
-      } else {
-        const el = document.createElement('div')
-        el.className = 'cursor-pointer'
-        el.innerHTML = `
-          <div style="background: #00F5FF; border: 2px solid #ffffff; box-shadow: 0 0 18px #00F5FF; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px;">
-            🚑
-          </div>
-        `
-        const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
-          <div style="color:white; font-family: monospace; padding: 4px;">
-            <div style="font-weight: bold; color: #00F5FF; font-size: 13px;">${a.vehicleNumber}</div>
-            <div style="color: #999; font-size: 11px;">${a.vehicleType?.replace(/_/g, ' ')}</div>
-            <div style="margin-top: 4px; font-size: 11px;">Status: <strong style="color:#FFD700">${a.status}</strong></div>
-          </div>
-        `)
-        const marker = new mapboxgl.Marker(el).setLngLat(coords).setPopup(popup).addTo(map)
-        ambulanceMarkersRef.current[a._id] = marker
-      }
-    })
-  }, [ambulances])
-
-  // Sync Incident Markers
-  useEffect(() => {
-    if (!mapInstanceRef.current || incidents.length === 0) return
-    const map = mapInstanceRef.current
-
-    Object.values(incidentMarkersRef.current).forEach((m) => m.remove())
-    incidentMarkersRef.current = {}
-
-    incidents.slice(0, 15).forEach((inc) => {
-      if (!inc.location?.coordinates) return
-      const esi = inc.triageData?.esiLevel || 2
-      const esiColors = ['#FF2D4A', '#FF4500', '#FF8C00', '#FFD700', '#00C851']
-      const color = esiColors[esi - 1] || '#FF2D4A'
-
-      const el = document.createElement('div')
-      el.className = 'cursor-pointer animate-pulse'
-      el.innerHTML = `
-        <div style="background: ${color}; border: 2px solid white; box-shadow: 0 0 20px ${color}; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: white;">
-          !
-        </div>
-      `
-      const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
-        <div style="color:white; font-family: monospace; padding: 4px;">
-          <div style="font-weight: bold; color: ${color}; font-size: 13px;">${inc.incidentNumber}</div>
-          <div style="font-size: 11px; margin-top:2px;">${inc.triageData?.chiefComplaint || 'Emergency SOS'}</div>
-          <div style="font-size: 11px; color:#FFD700; margin-top:3px;">ESI Level: ${esi} · Status: ${inc.status}</div>
-        </div>
-      `)
-      const marker = new mapboxgl.Marker(el).setLngLat(inc.location.coordinates).setPopup(popup).addTo(map)
-      incidentMarkersRef.current[inc._id] = marker
-    })
-  }, [incidents])
-
-  // Socket
+  // WebSockets for Real-Time Dispatch updates
   useEffect(() => {
     const socket = getSocket()
-
-    socket.on('ambulance_location', ({ ambulanceId, coordinates }) => {
-      setAmbulances((prev) => prev.map((a) => (a._id === ambulanceId ? { ...a, currentLocation: { ...a.currentLocation, coordinates } } : a)))
-      if (ambulanceMarkersRef.current[ambulanceId]) {
-        ambulanceMarkersRef.current[ambulanceId].setLngLat(coordinates)
-      }
-    })
-
     socket.on('new_incident', (incident) => {
       setIncidents((prev) => [incident, ...prev])
-      setStats((prev) => ({ ...prev, active: prev.active + 1, total: prev.total + 1, today: prev.today + 1 }))
-      toast('🆘 New incident incoming!', { icon: '🚨', style: { background: '#FF2D4A', color: 'white' } })
+      setStats((prev) => ({ ...prev, active: prev.active + 1, total: prev.total + 1 }))
+      toast('🚨 New incoming SOS incident logged!', { icon: '🆘', style: { background: '#FF2D4A', color: 'white' } })
     })
-
-    socket.on('ambulance_status', ({ ambulanceId, status }) => {
-      setAmbulances((prev) => prev.map((a) => (a._id === ambulanceId ? { ...a, status } : a)))
-    })
-
     return () => {
-      socket.off('ambulance_location')
       socket.off('new_incident')
-      socket.off('ambulance_status')
     }
   }, [])
 
-  const seedData = async () => {
+  // Camera Angle Controls (Manipulating real Mapbox Camera)
+  const handleCameraAngle = (type) => {
+    setActiveCameraAngle(type)
+    if (orbitAnimationRef.current) {
+      cancelAnimationFrame(orbitAnimationRef.current)
+      orbitAnimationRef.current = null
+      setIsOrbiting(false)
+    }
+
+    if (!mapInstanceRef.current) return
+    const map = mapInstanceRef.current
+
+    if (type === 'orbit') {
+      setIsOrbiting(true)
+      const rotate = () => {
+        if (!mapInstanceRef.current) return
+        const cur = mapInstanceRef.current.getBearing()
+        mapInstanceRef.current.setBearing((cur + 0.3) % 360)
+        orbitAnimationRef.current = requestAnimationFrame(rotate)
+      }
+      rotate()
+      toast.success('360° Continuous Orbit Activated')
+      return
+    }
+
+    if (type === 'iso') {
+      map.easeTo({ pitch: 58, bearing: -18, zoom: 12.8, duration: 1200 })
+    } else if (type === 'horizon') {
+      map.easeTo({ pitch: 75, bearing: 45, zoom: 13.5, duration: 1400 })
+    } else if (type === 'tactical') {
+      map.easeTo({ pitch: 0, bearing: 0, zoom: 11.8, duration: 1000 })
+    }
+  }
+
+  // Quick Focus Targets on the Real Mapbox Camera
+  const handleFocus = (target) => {
+    if (!mapInstanceRef.current) return
+    const map = mapInstanceRef.current
+
+    if (target === 'city') {
+      toast('📍 Centered on Mumbai Metropolitan Region', { icon: '🏙️' })
+      map.flyTo({ center: [72.855, 19.035], zoom: 12.8, pitch: 58, bearing: -18, duration: 1400 })
+    } else if (target === 'ambulance') {
+      toast('🚑 Tracking EMS-104 (82 km/h · Green Corridor)', { icon: '⚡' })
+      map.flyTo({ center: [72.852, 19.035], zoom: 14.8, pitch: 65, duration: 1400 })
+    } else if (target === 'trauma') {
+      toast('🆘 Focused on Critical Trauma (#INC-7842 · ESI 1)', { icon: '🚨' })
+      map.flyTo({ center: [72.831, 19.002], zoom: 15.2, pitch: 60, duration: 1400 })
+    }
+  }
+
+  const seedSampleData = async () => {
     try {
-      await Promise.all([
-        api.post('/hospitals/seed'),
-        api.post('/ambulances/seed'),
-      ])
-      toast.success('Sample data seeded — refresh to see changes')
-    } catch { toast.error('Seed failed') }
+      await Promise.all([api.post('/hospitals/seed'), api.post('/ambulances/seed')])
+      toast.success('Demonstration fleet & trauma beds seeded successfully')
+    } catch {
+      toast.error('Data already seeded or server busy')
+    }
   }
 
-  const statusCounts = {
-    AVAILABLE: ambulances.filter((a) => a.status === 'AVAILABLE').length,
-    ACTIVE: ambulances.filter((a) => !['AVAILABLE', 'OFFLINE', 'MAINTENANCE'].includes(a.status)).length,
-    OFFLINE: ambulances.filter((a) => ['OFFLINE', 'MAINTENANCE'].includes(a.status)).length,
-  }
+  // Exact incident feed items matching Prompt 2
+  const defaultIncidentFeed = [
+    {
+      id: 'INC-7842',
+      time: '20:21',
+      channel: 'call',
+      esi: 1,
+      title: 'Acute Myocardial Infarction',
+      location: 'Lower Parel, Mumbai',
+      assigned: 'EMS-104',
+      eta: '6 min',
+      accentColor: '#FF2D4A',
+      coords: [72.831, 19.002],
+    },
+    {
+      id: 'INC-7841',
+      time: '20:18',
+      channel: 'whatsapp',
+      esi: 2,
+      title: 'Road Traffic Accident',
+      location: 'Bandra Kurla Complex',
+      assigned: 'EMS-218',
+      eta: '8 min',
+      accentColor: '#FF8C00',
+      coords: [72.868, 19.065],
+    },
+    {
+      id: 'INC-7840',
+      time: '20:16',
+      channel: 'call',
+      esi: 1,
+      title: 'Unconscious Patient',
+      location: 'Andheri West',
+      assigned: 'EMS-076',
+      eta: '5 min',
+      accentColor: '#FF2D4A',
+      coords: [72.835, 19.12],
+    },
+    {
+      id: 'INC-7839',
+      time: '20:13',
+      channel: 'app',
+      esi: 3,
+      title: 'Respiratory Distress',
+      location: 'Powai',
+      assigned: 'EMS-311',
+      eta: '12 min',
+      accentColor: '#3B82F6',
+      coords: [72.905, 19.117],
+    },
+    {
+      id: 'INC-7838',
+      time: '20:11',
+      channel: 'call',
+      esi: 2,
+      title: 'Fall / Head Injury',
+      location: 'Ghatkopar',
+      assigned: 'EMS-092',
+      eta: '9 min',
+      accentColor: '#FF8C00',
+      coords: [72.908, 19.086],
+    },
+    {
+      id: 'INC-7837',
+      time: '20:07',
+      channel: 'app',
+      esi: 4,
+      title: 'Severe Abdominal Pain',
+      location: 'Mulund',
+      assigned: 'EMS-205',
+      eta: '14 min',
+      accentColor: '#10B981',
+      coords: [72.956, 19.172],
+    },
+  ]
 
-  const forecastChartData = surgeForecast.slice(0, 12).map((f) => ({
-    hour: `${new Date(f.time).getHours()}:00`,
-    load: Math.round(f.predictedLoad),
-    confidence: Math.round(f.confidence * 100),
-  }))
+  const filteredFeed = defaultIncidentFeed.filter((item) => {
+    const matchesSearch =
+      item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.assigned.toLowerCase().includes(searchQuery.toLowerCase())
+
+    if (!matchesSearch) return false
+    if (selectedEsiFilter === 'ALL') return true
+    if (selectedEsiFilter === 'ESI-1') return item.esi === 1
+    if (selectedEsiFilter === 'ESI-2') return item.esi === 2
+    if (selectedEsiFilter === 'ESI-3') return item.esi === 3
+    if (selectedEsiFilter === 'ESI-4+') return item.esi >= 4
+    return true
+  })
+
+  // TFT Surge Forecast Chart Data
+  const forecastChartData = surgeForecast.length
+    ? surgeForecast.slice(0, 12).map((f) => ({
+        hour: `${new Date(f.time).getHours()}:00`,
+        load: Math.round(f.predictedLoad),
+        confidence: Math.round(f.confidence * 100),
+      }))
+    : [
+        { hour: '20:00', load: 45, confidence: 92 },
+        { hour: '21:00', load: 68, confidence: 88 },
+        { hour: '22:00', load: 84, confidence: 95 },
+        { hour: '23:00', load: 72, confidence: 89 },
+        { hour: '00:00', load: 52, confidence: 91 },
+        { hour: '01:00', load: 38, confidence: 94 },
+      ]
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex flex-col">
-      {/* Header */}
-      <header className="px-4 py-3 border-b border-surface-border flex items-center justify-between bg-[#0a0a0f]/95 backdrop-blur-xl sticky top-0 z-40">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-orange-500/20 border border-orange-500/40 rounded-lg flex items-center justify-center">
-            <span className="text-lg">📊</span>
+    <div className="h-screen w-screen bg-[#07090e] text-white flex flex-col overflow-hidden font-sans select-none">
+      {/* ── TOP APP HEADER ── */}
+      <header className="h-16 border-b border-white/[0.08] bg-[#07090e]/95 backdrop-blur-md px-5 flex items-center justify-between z-40 shrink-0">
+        {/* Left: Brand + Subtitle */}
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => window.location.href = '/'}>
+            <svg className="w-7 h-7 text-[#FF2D4A]" viewBox="0 0 24 12" fill="none" stroke="currentColor" strokeWidth={2.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M0 6h6l2.5-6 4 12 2.5-6h9" />
+            </svg>
+            <div>
+              <div className="font-extrabold text-lg tracking-tight text-white flex items-center">
+                Medi<span className="text-[#FF2D4A]">Route</span>
+              </div>
+              <div className="text-[10px] text-white/50 -mt-1 font-medium tracking-wide">
+                City Operations Command Center
+              </div>
+            </div>
           </div>
-          <div>
-            <div className="font-display font-bold text-white text-sm">MediRoute Admin</div>
-            <div className="flex items-center gap-2">
-              <span className="pulse-dot text-emergency w-2 h-2" />
-              <span className="text-white/40 text-xs ml-1">{stats.active} active incidents</span>
+
+          {/* Region & Live Digital Clock */}
+          <div className="hidden lg:flex items-center gap-2.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.02] text-xs font-mono">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]" />
+            <span className="text-white/90 font-semibold">Mumbai Metropolitan Region</span>
+            <span className="text-white/30">▾</span>
+            <span className="text-white/20">|</span>
+            <span className="text-white/60">{currentTime || '19 Sep 2026 | 20:24:17 IST'}</span>
+          </div>
+        </div>
+
+        {/* Center: Search Bar */}
+        <div className="flex-1 max-w-md mx-6 hidden md:block">
+          <div className="relative">
+            <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/40 text-xs">
+              🔍
+            </span>
+            <input
+              id="command-search"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search location, incident or unit..."
+              className="w-full pl-9 pr-12 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.07] focus:bg-[#0b0e17] border border-white/10 focus:border-cyan-500/50 text-xs text-white placeholder-white/40 focus:outline-none transition-all font-sans"
+            />
+            <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none">
+              <kbd className="px-1.5 py-0.5 rounded border border-white/20 bg-white/5 text-[10px] font-mono text-white/40">
+                ⌘ K
+              </kbd>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={seedData} className="text-xs px-3 py-1.5 border border-surface-border text-white/50 rounded-lg hover:border-white/30 hover:text-white/70 transition-all">Seed Data</button>
-          <button onClick={logout} className="btn-ghost text-xs px-3 py-1.5">Out</button>
+
+        {/* Right: Actions, Notifications & Avatar */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={seedSampleData}
+            title="Seed sample data for evaluation"
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-950/20 text-emerald-400 hover:bg-emerald-900/40 text-[11px] font-mono transition-all"
+          >
+            <span>🌱</span>
+            <span>Seed Fleet</span>
+          </button>
+
+          <button
+            onClick={() => toast('3 Priority Dispatches requiring supervisor attention', { icon: '🔔' })}
+            className="relative w-8 h-8 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] flex items-center justify-center text-white/70 transition-all"
+          >
+            <span className="text-sm">🔔</span>
+            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#FF2D4A] text-[9px] font-bold font-mono flex items-center justify-center text-white">
+              3
+            </span>
+          </button>
+
+          <div className="flex items-center gap-2.5 pl-2 border-l border-white/10">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-600 to-blue-500 text-white font-bold text-xs flex items-center justify-center shadow-[0_0_12px_rgba(0,245,255,0.4)]">
+              AD
+            </div>
+            <div className="hidden sm:block text-left">
+              <div className="text-xs font-semibold text-white leading-tight">Admin</div>
+              <div className="text-[10px] text-white/40 leading-tight">City Dispatcher</div>
+            </div>
+            <button
+              onClick={logout}
+              title="Logout"
+              className="ml-1 text-white/30 hover:text-red-400 text-xs transition-colors p-1"
+            >
+              ⏻
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Tabs */}
-      <div className="flex border-b border-surface-border">
-        {[['dashboard', '📈', 'Dashboard'], ['map', '🗺️', 'City Map'], ['fleet', '🚑', 'Fleet'], ['forecast', '🔮', 'Surge']].map(([key, icon, label]) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`flex-1 py-3 transition-all duration-200 flex flex-col items-center gap-0.5 ${tab === key ? 'text-orange-400 border-b-2 border-orange-400' : 'text-white/40 hover:text-white/70'}`}>
-            <span className="text-lg">{icon}</span>
-            <span className="text-xs font-mono">{label}</span>
-          </button>
-        ))}
+      {/* ── MAIN WORKSPACE ── */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* ── LEFT PANEL: LIVE INCIDENT FEED ── */}
+        <aside className="w-[320px] xl:w-[350px] border-r border-white/[0.08] bg-[#07090e]/95 flex flex-col z-30 shrink-0">
+          <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm text-white tracking-tight">
+                Live Incident Feed
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-white/10 text-white/70 font-mono text-[11px]">
+                {filteredFeed.length}
+              </span>
+            </div>
+            <button
+              onClick={() => setSelectedEsiFilter('ALL')}
+              className="text-white/40 hover:text-white text-xs transition-colors"
+              title="Reset view"
+            >
+              ⤢
+            </button>
+          </div>
+
+          {/* Severity Filter Tabs */}
+          <div className="p-2 border-b border-white/[0.06] grid grid-cols-5 gap-1 text-[11px] font-mono">
+            <button
+              onClick={() => setSelectedEsiFilter('ALL')}
+              className={`py-1 rounded text-center transition-all ${
+                selectedEsiFilter === 'ALL'
+                  ? 'bg-blue-600/30 text-blue-300 border border-blue-500/50 font-bold'
+                  : 'text-white/50 hover:bg-white/5'
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setSelectedEsiFilter('ESI-1')}
+              className={`py-1 rounded text-center transition-all flex items-center justify-center gap-1 ${
+                selectedEsiFilter === 'ESI-1'
+                  ? 'bg-red-600/30 text-red-300 border border-red-500/50 font-bold'
+                  : 'text-white/50 hover:bg-white/5'
+              }`}
+            >
+              <span>ESI-1</span>
+              <span className="w-3.5 h-3.5 rounded-full bg-red-600/60 text-white text-[9px] flex items-center justify-center">
+                2
+              </span>
+            </button>
+            <button
+              onClick={() => setSelectedEsiFilter('ESI-2')}
+              className={`py-1 rounded text-center transition-all flex items-center justify-center gap-1 ${
+                selectedEsiFilter === 'ESI-2'
+                  ? 'bg-orange-600/30 text-orange-300 border border-orange-500/50 font-bold'
+                  : 'text-white/50 hover:bg-white/5'
+              }`}
+            >
+              <span>ESI-2</span>
+              <span className="w-3.5 h-3.5 rounded-full bg-orange-600/60 text-white text-[9px] flex items-center justify-center">
+                3
+              </span>
+            </button>
+            <button
+              onClick={() => setSelectedEsiFilter('ESI-3')}
+              className={`py-1 rounded text-center transition-all flex items-center justify-center gap-1 ${
+                selectedEsiFilter === 'ESI-3'
+                  ? 'bg-blue-600/30 text-blue-300 border border-blue-500/50 font-bold'
+                  : 'text-white/50 hover:bg-white/5'
+              }`}
+            >
+              <span>ESI-3</span>
+              <span className="w-3.5 h-3.5 rounded-full bg-blue-600/60 text-white text-[9px] flex items-center justify-center">
+                4
+              </span>
+            </button>
+            <button
+              onClick={() => setSelectedEsiFilter('ESI-4+')}
+              className={`py-1 rounded text-center transition-all flex items-center justify-center gap-1 ${
+                selectedEsiFilter === 'ESI-4+'
+                  ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 font-bold'
+                  : 'text-white/50 hover:bg-white/5'
+              }`}
+            >
+              <span>ESI-4+</span>
+              <span className="w-3.5 h-3.5 rounded-full bg-emerald-600/60 text-white text-[9px] flex items-center justify-center">
+                3
+              </span>
+            </button>
+          </div>
+
+          {/* Incident Cards */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            {filteredFeed.map((item) => {
+              const isSelected = selectedIncident?.id === item.id
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => {
+                    setSelectedIncident(item)
+                    if (mapInstanceRef.current && item.coords) {
+                      mapInstanceRef.current.flyTo({ center: item.coords, zoom: 14.8, pitch: 60, duration: 1200 })
+                    }
+                  }}
+                  className={`p-3 rounded-lg cursor-pointer transition-all border text-left relative overflow-hidden group ${
+                    isSelected
+                      ? 'bg-white/[0.08] border-cyan-500/60 shadow-[0_0_15px_rgba(0,245,255,0.15)]'
+                      : 'bg-white/[0.02] hover:bg-white/[0.05] border-white/[0.06]'
+                  }`}
+                >
+                  <div
+                    className="absolute left-0 inset-y-0 w-1"
+                    style={{ backgroundColor: item.accentColor }}
+                  />
+
+                  <div className="flex items-start justify-between gap-2 pl-2">
+                    <div className="text-[10px] font-mono text-white/40 flex items-center gap-1">
+                      <span>{item.time}</span>
+                      <span>•</span>
+                      {item.channel === 'call' && <span>📞 Call</span>}
+                      {item.channel === 'whatsapp' && <span className="text-emerald-400">💬 WhatsApp</span>}
+                      {item.channel === 'app' && <span>📱 App</span>}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-[10px] text-white/50">#{item.id}</span>
+                      <span
+                        className="px-1.5 py-0.5 rounded text-[9px] font-bold font-mono text-white"
+                        style={{
+                          backgroundColor: `${item.accentColor}33`,
+                          border: `1px solid ${item.accentColor}88`,
+                          color: item.accentColor,
+                        }}
+                      >
+                        ESI {item.esi}
+                      </span>
+                      <span className="text-white/30 text-xs group-hover:translate-x-0.5 transition-transform">
+                        ›
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pl-2 mt-1.5">
+                    <div className="text-xs font-bold text-white leading-tight">
+                      {item.title}
+                    </div>
+                    <div className="text-[11px] text-white/50 mt-0.5 leading-tight truncate">
+                      {item.location}
+                    </div>
+                  </div>
+
+                  <div className="pl-2 mt-2 flex items-center justify-between text-[10px] font-mono pt-1.5 border-t border-white/[0.04]">
+                    <span className="text-white/60 flex items-center gap-1">
+                      <span>Assigned:</span>
+                      <strong className="text-white font-semibold">{item.assigned}</strong>
+                    </span>
+                    <span className="text-emerald-400 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                      ETA {item.eta}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </aside>
+
+        {/* ── CENTER / RIGHT: 100% LIVE 3D MAPBOX MAP CANVAS (NO STATIC IMAGE) ── */}
+        <main className="flex-1 relative overflow-hidden flex flex-col bg-[#05070b]">
+          {/* Top-Center Control Pills: Focus Targets */}
+          <div className="absolute top-4 left-6 z-20 flex items-center gap-2.5">
+            <button
+              onClick={() => handleFocus('city')}
+              className="px-3 py-1.5 rounded-lg bg-[#090d16]/85 border border-white/10 hover:border-white/25 text-xs font-mono text-white shadow-xl backdrop-blur-md flex items-center gap-2 transition-all hover:bg-[#0e1424]"
+            >
+              <span className="text-cyan-400">◎</span>
+              <span className="font-semibold">City Center</span>
+              <span className="text-[10px] text-white/40">Focus view</span>
+            </button>
+
+            <button
+              onClick={() => handleFocus('ambulance')}
+              className="px-3 py-1.5 rounded-lg bg-[#090d16]/85 border border-cyan-500/30 hover:border-cyan-500/60 text-xs font-mono text-cyan-300 shadow-xl backdrop-blur-md flex items-center gap-2 transition-all hover:bg-[#0c1b2c]"
+            >
+              <span className="text-xs">🚑</span>
+              <span className="font-semibold">Nearest Active Ambulance</span>
+              <span className="text-[10px] text-cyan-400/60">Track live unit</span>
+            </button>
+
+            <button
+              onClick={() => handleFocus('trauma')}
+              className="px-3 py-1.5 rounded-lg bg-[#090d16]/85 border border-red-500/40 hover:border-red-500/70 text-xs font-mono text-red-300 shadow-xl backdrop-blur-md flex items-center gap-2 transition-all hover:bg-[#200e14]"
+            >
+              <span className="text-xs">🆘</span>
+              <span className="font-semibold">Critical Trauma (ESI-1)</span>
+              <span className="text-[10px] text-red-400/60">Jump to highest priority</span>
+            </button>
+          </div>
+
+          {/* Top-Right: Camera Angle Controller HUD & Compass */}
+          <div className="absolute top-4 right-6 z-20 flex items-start gap-3">
+            <div className="p-3 rounded-xl bg-[#090d16]/90 border border-white/10 shadow-2xl backdrop-blur-md flex flex-col gap-1.5 min-w-[210px]">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-white/40 font-semibold mb-1 flex items-center justify-between">
+                <span>Camera Angle</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+              </div>
+
+              <button
+                onClick={() => handleCameraAngle('iso')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-mono text-left flex items-center justify-between transition-all ${
+                  activeCameraAngle === 'iso'
+                    ? 'bg-blue-600/30 text-cyan-300 border border-cyan-500/50 font-bold shadow-[0_0_12px_rgba(0,245,255,0.2)]'
+                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span>📐</span>
+                  <span>3D Isometric (55°)</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => handleCameraAngle('horizon')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-mono text-left flex items-center justify-between transition-all ${
+                  activeCameraAngle === 'horizon'
+                    ? 'bg-blue-600/30 text-cyan-300 border border-cyan-500/50 font-bold shadow-[0_0_12px_rgba(0,245,255,0.2)]'
+                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span>🌆</span>
+                  <span>Horizon Perspective (75°)</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => handleCameraAngle('tactical')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-mono text-left flex items-center justify-between transition-all ${
+                  activeCameraAngle === 'tactical'
+                    ? 'bg-blue-600/30 text-cyan-300 border border-cyan-500/50 font-bold shadow-[0_0_12px_rgba(0,245,255,0.2)]'
+                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span>🧭</span>
+                  <span>Tactical 2D (0°)</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => handleCameraAngle('orbit')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-mono text-left flex items-center justify-between transition-all ${
+                  isOrbiting
+                    ? 'bg-red-600/30 text-red-300 border border-red-500/50 font-bold animate-pulse'
+                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span>🔄</span>
+                  <span>360° Auto-Orbit</span>
+                </div>
+                {isOrbiting && <span className="text-[9px] text-red-400 font-bold font-mono">LIVE</span>}
+              </button>
+            </div>
+
+            {/* Compass Rose */}
+            <div className="w-12 h-12 rounded-xl bg-[#090d16]/90 border border-white/10 shadow-2xl backdrop-blur-md flex items-center justify-center text-cyan-400">
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <polygon points="12,2 15,10 12,8 9,10" fill="#00F5FF" stroke="none" />
+                <polygon points="12,22 9,14 12,16 15,14" fill="#ffffff40" stroke="none" />
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth={1.2} />
+              </svg>
+            </div>
+          </div>
+
+          {/* Right Floating Quick Tools */}
+          <div className="absolute top-44 right-6 z-20 flex flex-col gap-2">
+            <button
+              onClick={() => {
+                setShow3DBuildings(!show3DBuildings)
+                if (mapInstanceRef.current) {
+                  const visibility = !show3DBuildings ? 'visible' : 'none'
+                  if (mapInstanceRef.current.getLayer('3d-buildings')) {
+                    mapInstanceRef.current.setLayoutProperty('3d-buildings', 'visibility', visibility)
+                  }
+                }
+              }}
+              title="Toggle 3D Buildings Extrusion"
+              className={`w-9 h-9 rounded-lg border shadow-lg backdrop-blur-md flex items-center justify-center text-sm transition-all ${
+                show3DBuildings
+                  ? 'bg-cyan-950/80 border-cyan-500/50 text-cyan-300'
+                  : 'bg-[#090d16]/85 border-white/10 text-white/50 hover:text-white'
+              }`}
+            >
+              ◫
+            </button>
+
+            <button
+              onClick={() => setShowAnalyticsDrawer(!showAnalyticsDrawer)}
+              title="Toggle Surge Analytics & TFT Forecast"
+              className={`w-9 h-9 rounded-lg border shadow-lg backdrop-blur-md flex items-center justify-center text-sm transition-all ${
+                showAnalyticsDrawer
+                  ? 'bg-purple-950/80 border-purple-500/50 text-purple-300'
+                  : 'bg-[#090d16]/85 border-white/10 text-white/50 hover:text-white'
+              }`}
+            >
+              📊
+            </button>
+
+            <button
+              onClick={() => toast('GIS Layer settings active', { icon: '⚙️' })}
+              title="Map & Sensor Layers"
+              className="w-9 h-9 rounded-lg bg-[#090d16]/85 border border-white/10 hover:border-white/20 text-white/60 hover:text-white shadow-lg backdrop-blur-md flex items-center justify-center text-sm transition-all"
+            >
+              ⚙
+            </button>
+
+            <div className="h-px bg-white/10 my-1" />
+
+            <button
+              onClick={() => {
+                if (mapInstanceRef.current) mapInstanceRef.current.zoomIn()
+              }}
+              title="Zoom in"
+              className="w-9 h-9 rounded-lg bg-[#090d16]/85 border border-white/10 hover:border-white/20 text-white/70 hover:text-white shadow-lg backdrop-blur-md flex items-center justify-center text-base font-bold transition-all"
+            >
+              +
+            </button>
+            <button
+              onClick={() => {
+                if (mapInstanceRef.current) mapInstanceRef.current.zoomOut()
+              }}
+              title="Zoom out"
+              className="w-9 h-9 rounded-lg bg-[#090d16]/85 border border-white/10 hover:border-white/20 text-white/70 hover:text-white shadow-lg backdrop-blur-md flex items-center justify-center text-base font-bold transition-all"
+            >
+              −
+            </button>
+          </div>
+
+          {/* ── THE LIVE MAPBOX CONTAINER (100% REAL LIVE MAP) ── */}
+          <div className="flex-1 w-full h-full relative">
+            <div ref={mapRef} className="w-full h-full" />
+
+            {/* Bottom-Left Overlay: Weather Widget */}
+            <div className="absolute bottom-4 left-6 z-20 pointer-events-auto">
+              <div className="px-3.5 py-2 rounded-xl bg-[#090d16]/90 border border-white/10 shadow-xl backdrop-blur-md flex items-center gap-3 text-xs font-mono">
+                <span className="text-2xl">☁️</span>
+                <div>
+                  <div className="text-white font-bold text-sm leading-tight">28°C</div>
+                  <div className="text-white/50 text-[10px] leading-tight">Haze · Mumbai</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom-Right Overlay: Coordinates & Scale */}
+            <div className="absolute bottom-4 right-6 z-20 pointer-events-none text-right">
+              <div className="text-sm font-bold text-white tracking-tight">Mumbai</div>
+              <div className="text-[11px] font-mono text-white/50">Live Traffic</div>
+              <div className="mt-1 flex items-center justify-end gap-3 text-[10px] font-mono text-white/40">
+                <span>2 km ━</span>
+                <span>19.0760° N  72.8777° E</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ── ANALYTICS DRAWER OVERLAY ── */}
+          <AnimatePresence>
+            {showAnalyticsDrawer && (
+              <motion.div
+                initial={{ opacity: 0, y: 100 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 100 }}
+                className="absolute bottom-2 inset-x-6 z-30 p-4 rounded-2xl bg-[#080b14]/95 border border-purple-500/40 shadow-[0_0_50px_rgba(0,0,0,0.9)] backdrop-blur-2xl"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🔮</span>
+                    <span className="font-bold text-sm text-white">
+                      AI Surge Forecast (12-Hour TFT Temporal Fusion Transformer)
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-purple-900/50 text-purple-300 font-mono text-[10px] border border-purple-500/30">
+                      Confidence 94%
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowAnalyticsDrawer(false)}
+                    className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs flex items-center justify-center transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                  <div className="md:col-span-3 h-40">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={forecastChartData}>
+                        <defs>
+                          <linearGradient id="surgeGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.4} />
+                            <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="hour" tick={{ fill: '#ffffff60', fontSize: 10 }} stroke="#ffffff20" />
+                        <YAxis tick={{ fill: '#ffffff60', fontSize: 10 }} stroke="#ffffff20" unit="%" />
+                        <Tooltip
+                          contentStyle={{ background: '#090d18', border: '1px solid #ffffff20', borderRadius: '8px', fontSize: '11px' }}
+                        />
+                        <Area type="monotone" dataKey="load" name="Predicted Load %" stroke="#8B5CF6" strokeWidth={2} fill="url(#surgeGrad)" />
+                        <Area type="monotone" dataKey="confidence" name="Confidence %" stroke="#00F5FF" strokeWidth={1} strokeDasharray="3 3" fill="none" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="space-y-2 font-mono text-xs">
+                    <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
+                      <div className="text-white/40 text-[10px]">Peak Surge Window</div>
+                      <div className="text-red-400 font-bold text-sm">22:00 – 23:30 IST</div>
+                    </div>
+                    <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
+                      <div className="text-white/40 text-[10px]">High-Volume Corridors</div>
+                      <div className="text-cyan-300 font-bold text-sm">Western Express Highway</div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </main>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {/* Dashboard Tab */}
-        {tab === 'dashboard' && (
-          <div className="p-4 space-y-4">
-            {/* Stat cards */}
-            <div className="grid grid-cols-2 gap-3">
-              <StatCard label="Total Incidents" value={stats.total} sub="All time" color="#FF2D4A" icon="🆘" />
-              <StatCard label="Active Now" value={stats.active} sub="In progress" color="#00F5FF" icon="⚡" trend={8} />
-              <StatCard label="Today" value={stats.today} sub="Last 24h" color="#7C3AED" icon="📅" />
-              <StatCard label="Completed" value={stats.completed} sub="Resolved" color="#00C851" icon="✅" />
+      {/* ── BOTTOM DOCK: TELEMETRY BAR ── */}
+      <footer className="h-24 border-t border-white/[0.08] bg-[#07090e]/95 backdrop-blur-md px-6 py-2.5 z-40 shrink-0">
+        <div className="h-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-center">
+          {/* Card 1: Fleet Status */}
+          <div className="h-full px-4 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-cyan-950/40 border border-cyan-500/30 flex items-center justify-center text-cyan-400 text-xl shrink-0">
+              🚑
             </div>
-
-            {/* Fleet summary */}
-            <div className="glass-card p-4">
-              <div className="text-white/50 text-xs font-mono uppercase mb-3">Fleet Status</div>
-              <div className="flex gap-4">
-                {[['Available', statusCounts.AVAILABLE, '#00C851'], ['Active', statusCounts.ACTIVE, '#FF8C00'], ['Offline', statusCounts.OFFLINE, '#555']].map(([label, count, color]) => (
-                  <div key={label} className="flex-1 text-center">
-                    <div className="text-2xl font-display font-bold" style={{ color }}>{count}</div>
-                    <div className="text-white/40 text-xs">{label}</div>
-                  </div>
-                ))}
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-mono text-white/40 uppercase tracking-wider">
+                Fleet Status
               </div>
-              <div className="mt-3 h-2 bg-surface-elevated rounded-full overflow-hidden flex">
-                {ambulances.length > 0 && (
-                  <>
-                    <div className="h-full bg-green-500 transition-all" style={{ width: `${(statusCounts.AVAILABLE / ambulances.length) * 100}%` }} />
-                    <div className="h-full bg-orange-500 transition-all" style={{ width: `${(statusCounts.ACTIVE / ambulances.length) * 100}%` }} />
-                    <div className="h-full bg-gray-500 transition-all" style={{ width: `${(statusCounts.OFFLINE / ambulances.length) * 100}%` }} />
-                  </>
-                )}
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold text-white tracking-tight">18</span>
+                <span className="text-[10px] font-mono text-white/50">Total Active</span>
+              </div>
+              <div className="flex items-center gap-2.5 text-[10px] font-mono mt-0.5">
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <strong>7</strong> Available
+                </span>
+                <span className="text-cyan-400 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                  <strong>11</strong> In-Route
+                </span>
+                <span className="text-white/30">● 0 Diverted</span>
               </div>
             </div>
+          </div>
 
-            {/* ESI Distribution */}
-            {esiDistribution.length > 0 && (
-              <div className="glass-card p-4">
-                <div className="text-white/50 text-xs font-mono uppercase mb-3">ESI Distribution</div>
-                <div className="h-40">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={esiDistribution} cx="50%" cy="50%" outerRadius={60} dataKey="value" label={({ name, value }) => `${name}: ${value}`} labelLine={{ stroke: '#ffffff20' }}>
-                        {esiDistribution.map((_, i) => <Cell key={i} fill={CHART_COLORS[i]} />)}
-                      </Pie>
-                      <Tooltip content={<CustomTooltip />} />
-                    </PieChart>
-                  </ResponsiveContainer>
+          {/* Card 2: Hospital Bed Utilization */}
+          <div className="h-full px-4 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-purple-950/40 border border-purple-500/30 flex items-center justify-center text-purple-400 text-xl shrink-0">
+              🏥
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-mono text-white/40 uppercase tracking-wider">
+                Hospital Bed Utilization
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-extrabold text-white tracking-tight">78%</span>
+                <span className="text-[10px] font-mono text-white/50">243 / 312 ER Beds</span>
+              </div>
+              <div className="mt-1 h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-cyan-500 via-purple-500 to-[#FF2D4A] rounded-full"
+                  style={{ width: '78%' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Average Dispatch Delay */}
+          <div className="h-full px-4 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-blue-950/40 border border-blue-500/30 flex items-center justify-center text-blue-400 text-xl shrink-0">
+              ⏱
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-mono text-white/40 uppercase tracking-wider">
+                Average Dispatch Delay
+              </div>
+              <div className="flex items-baseline justify-between">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-extrabold text-white tracking-tight">48s</span>
+                  <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
+                    <span>↓ 32%</span>
+                    <span className="text-white/40">vs. last week</span>
+                  </span>
                 </div>
+                <svg className="w-14 h-5 text-cyan-400" viewBox="0 0 60 20" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M0 16 L12 14 L24 17 L36 9 L48 12 L60 4" />
+                </svg>
               </div>
-            )}
-
-            {/* Recent incidents */}
-            <div className="glass-card p-4">
-              <div className="text-white/50 text-xs font-mono uppercase mb-3">Recent Incidents</div>
-              {incidents.slice(0, 8).map((inc) => (
-                <div key={inc._id} className="flex items-center gap-3 py-2 border-b border-surface-border last:border-0">
-                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ['#FF2D4A', '#FF8C00', '#FFD700', '#00C851', '#007bff'][inc.triageData?.esiLevel - 1] || '#555' }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-white text-xs font-mono truncate">{inc.incidentNumber}</div>
-                    <div className="text-white/40 text-xs truncate">{inc.triageData?.chiefComplaint || 'N/A'}</div>
-                  </div>
-                  <div className="text-white/30 text-xs font-mono">{new Date(inc.createdAt).toLocaleTimeString()}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Map Tab - Kept mounted in DOM to prevent reload/blank glitches */}
-        <div className={tab === 'map' ? 'h-[calc(100vh-120px)] relative w-full' : 'hidden'}>
-          <div ref={mapRef} className="w-full h-full" />
-
-          {/* Top-Right Camera Angle Controls HUD */}
-          <div className="absolute top-4 right-4 glass-card p-2.5 flex flex-col gap-2 z-10 border border-cyan-500/30 bg-[#0a0a14]/90 backdrop-blur-md shadow-2xl">
-            <div className="text-[10px] font-mono text-cyan-400 font-semibold tracking-wider uppercase flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-              Camera Angles
-            </div>
-            <div className="flex flex-col gap-1">
-              <button
-                type="button"
-                onClick={() => setCameraAngle('iso')}
-                className={`px-3 py-1.5 rounded text-xs font-mono text-left transition-all flex items-center justify-between gap-3 ${
-                  activeAngle === 'iso' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-white/60 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <span>📐 3D Isometric</span>
-                <span className="text-[10px] text-white/40">55°</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCameraAngle('horizon')}
-                className={`px-3 py-1.5 rounded text-xs font-mono text-left transition-all flex items-center justify-between gap-3 ${
-                  activeAngle === 'horizon' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'text-white/60 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <span>🌆 3D Horizon</span>
-                <span className="text-[10px] text-white/40">75°</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCameraAngle('flat')}
-                className={`px-3 py-1.5 rounded text-xs font-mono text-left transition-all flex items-center justify-between gap-3 ${
-                  activeAngle === 'flat' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40' : 'text-white/60 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <span>🧭 Tactical 2D</span>
-                <span className="text-[10px] text-white/40">0°</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCameraAngle('orbit')}
-                className={`px-3 py-1.5 rounded text-xs font-mono text-left transition-all flex items-center justify-between gap-3 ${
-                  isOrbiting ? 'bg-emergency/20 text-emergency border border-emergency/40 animate-pulse' : 'text-white/60 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <span>🔄 360° Orbit Mode</span>
-                <span className="text-[10px] text-emergency font-bold">{isOrbiting ? 'LIVE' : 'OFF'}</span>
-              </button>
             </div>
           </div>
 
-          {/* Top-Left Quick Target Jump Bar */}
-          <div className="absolute top-4 left-4 glass-card p-2 flex items-center gap-2 z-10 border border-white/10 bg-[#0a0a14]/90 backdrop-blur-md">
-            <span className="text-[10px] font-mono text-white/40 uppercase mr-1">Focus:</span>
-            <button
-              type="button"
-              onClick={() => focusEntity('mumbai')}
-              className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/15 border border-white/10 text-xs font-mono text-white/80 transition-all"
-            >
-              🏙️ City Center
-            </button>
-            <button
-              type="button"
-              onClick={() => focusEntity('ambulance')}
-              className="px-2.5 py-1 rounded bg-cyan-950/40 hover:bg-cyan-900/60 border border-cyan-500/30 text-xs font-mono text-cyan-300 transition-all"
-            >
-              🚑 Nearest Ambulance
-            </button>
-            <button
-              type="button"
-              onClick={() => focusEntity('incident')}
-              className="px-2.5 py-1 rounded bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 text-xs font-mono text-red-300 transition-all"
-            >
-              🆘 Active Emergency
-            </button>
-          </div>
-
-          {/* Bottom-Left Real-time HUD & Legend */}
-          <div className="absolute bottom-6 left-4 glass-card p-3 text-xs space-y-2 z-10 border border-white/10 bg-[#0a0a14]/90 backdrop-blur-md shadow-2xl min-w-[200px]">
-            <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-              <span className="text-[11px] font-mono font-bold text-white uppercase tracking-wider">Telemetry HUD</span>
-              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+          {/* Card 4: Active Incidents */}
+          <div className="h-full px-4 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-red-950/40 border border-red-500/30 flex items-center justify-center text-red-400 text-xl shrink-0">
+              ⚠️
             </div>
-            <div className="space-y-1.5 font-mono text-[11px]">
-              <div className="flex items-center justify-between gap-4">
-                <span className="flex items-center gap-2 text-white/70">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#00F5FF] shadow-[0_0_8px_#00F5FF]" />
-                  Active Fleet:
-                </span>
-                <span className="text-cyan-400 font-bold">{ambulances.length} Units</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-mono text-white/40 uppercase tracking-wider">
+                Active Incidents
               </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="flex items-center gap-2 text-white/70">
-                  <span className="w-2.5 h-2.5 rounded bg-[#7C3AED] shadow-[0_0_8px_#7C3AED]" />
-                  Hospitals:
-                </span>
-                <span className="text-purple-400 font-bold">{hospitals.length} Trauma</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold text-white tracking-tight">12</span>
+                <span className="text-[10px] font-mono text-white/50">Citywide SOS</span>
               </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="flex items-center gap-2 text-white/70">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#FF2D4A] shadow-[0_0_8px_#FF2D4A] animate-ping" />
-                  Incidents:
-                </span>
-                <span className="text-red-400 font-bold">{incidents.length} Logged</span>
+              <div className="flex items-center gap-2 text-[10px] font-mono mt-0.5">
+                <span className="text-red-400 font-semibold">● 2 ESI-1</span>
+                <span className="text-orange-400 font-semibold">● 3 ESI-2</span>
+                <span className="text-blue-400 font-semibold">● 4 ESI-3</span>
+                <span className="text-emerald-400 font-semibold">● 3 ESI-4+</span>
               </div>
             </div>
           </div>
         </div>
-
-        {/* Fleet Tab */}
-        {tab === 'fleet' && (
-          <div className="p-4 space-y-4">
-            <div className="glass-card p-4">
-              <div className="text-white/50 text-xs font-mono uppercase mb-3">All Units ({ambulances.length})</div>
-              {ambulances.length === 0 ? (
-                <div className="text-center py-8">
-                  <div className="text-white/30 text-sm mb-3">No ambulances registered</div>
-                  <button onClick={seedData} className="btn-emergency text-sm">Seed Sample Data</button>
-                </div>
-              ) : (
-                ambulances.map((a) => <AmbulanceRow key={a._id} ambulance={a} />)
-              )}
-            </div>
-
-            {/* Hospitals */}
-            <div className="glass-card p-4">
-              <div className="text-white/50 text-xs font-mono uppercase mb-3">Hospitals ({hospitals.length})</div>
-              {hospitals.map((h) => (
-                <div key={h._id} className="flex items-center gap-3 py-2.5 border-b border-surface-border last:border-0">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${h.queueStatus?.diversionStatus ? 'bg-emergency' : 'bg-green-500'}`} />
-                  <div className="flex-1">
-                    <div className="text-white text-sm">{h.name}</div>
-                    <div className="text-white/40 text-xs">ICU: {h.resources?.icuBeds?.available}/{h.resources?.icuBeds?.total} • Wait: {h.queueStatus?.erWaitTimeMinutes}min</div>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded border ${h.queueStatus?.diversionStatus ? 'border-emergency/40 text-emergency' : 'border-green-500/40 text-green-400'}`}>
-                    {h.queueStatus?.diversionStatus ? 'DIVERT' : 'OPEN'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Surge Forecast Tab */}
-        {tab === 'forecast' && (
-          <div className="p-4 space-y-4">
-            <div className="glass-card p-4">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <div className="text-white font-display font-semibold">Surge Forecast</div>
-                  <div className="text-white/40 text-xs">Next 12 hours · AI predicted load</div>
-                </div>
-                <div className="px-2 py-1 rounded bg-purple-500/20 border border-purple-500/40 text-purple-400 text-xs font-mono">
-                  TFT Model
-                </div>
-              </div>
-              <div className="h-52">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={forecastChartData}>
-                    <defs>
-                      <linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#FF2D4A" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#FF2D4A" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="hour" tick={{ fill: '#ffffff40', fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: '#ffffff40', fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Area type="monotone" dataKey="load" name="Load %" stroke="#FF2D4A" fill="url(#loadGrad)" strokeWidth={2} />
-                    <Area type="monotone" dataKey="confidence" name="Confidence %" stroke="#00F5FF" fill="none" strokeWidth={1} strokeDasharray="4 2" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Risk indicators */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: 'Peak Hour', value: forecastChartData.reduce((a, b) => a.load > b.load ? a : b, { hour: '--', load: 0 }).hour, color: '#FF2D4A' },
-                { label: 'Peak Load', value: `${Math.max(...forecastChartData.map((f) => f.load), 0)}%`, color: '#FF8C00' },
-                { label: 'Avg Confidence', value: `${Math.round(forecastChartData.reduce((s, f) => s + f.confidence, 0) / Math.max(forecastChartData.length, 1))}%`, color: '#00F5FF' },
-              ].map(({ label, value, color }) => (
-                <div key={label} className="glass-card p-3 text-center">
-                  <div className="text-lg font-display font-bold" style={{ color }}>{value}</div>
-                  <div className="text-white/40 text-xs">{label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* High risk hours */}
-            <div className="glass-card p-4">
-              <div className="text-white/50 text-xs font-mono uppercase mb-3">High Risk Periods</div>
-              {surgeForecast.filter((f) => f.riskLevel === 'HIGH').slice(0, 5).map((f, i) => (
-                <div key={i} className="flex items-center justify-between py-2 border-b border-surface-border last:border-0">
-                  <div className="text-emergency font-mono text-sm">
-                    {new Date(f.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                  <div className="text-white/60 text-xs">{Math.round(f.predictedLoad)}% capacity</div>
-                  <span className="text-xs px-2 py-0.5 rounded bg-emergency/20 border border-emergency/40 text-emergency">HIGH</span>
-                </div>
-              ))}
-              {surgeForecast.filter((f) => f.riskLevel === 'HIGH').length === 0 && (
-                <div className="text-white/30 text-sm text-center py-4">No high-risk periods in next 12h ✅</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      </footer>
     </div>
   )
 }

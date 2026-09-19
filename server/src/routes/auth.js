@@ -54,18 +54,24 @@ router.post('/login', async (req, res, next) => {
     const normalizedEmail = email.toLowerCase().trim()
     let user = await User.findOne({ email: normalizedEmail })
 
-    // Auto-provision standard demo account if not created yet
-    if (!user && DEMO_ACCOUNTS[normalizedEmail] && DEMO_ACCOUNTS[normalizedEmail].password === password) {
+    // Auto-provision or sync standard demo account if demo credentials provided
+    if (DEMO_ACCOUNTS[normalizedEmail] && DEMO_ACCOUNTS[normalizedEmail].password === password) {
       const demoData = DEMO_ACCOUNTS[normalizedEmail]
-      user = await User.create({
-        name: demoData.name,
-        email: normalizedEmail,
-        password: demoData.password,
-        phone: demoData.phone,
-        role: demoData.role,
-        isActive: true,
-        isOnDuty: true,
-      })
+      if (!user) {
+        user = await User.create({
+          name: demoData.name,
+          email: normalizedEmail,
+          password: demoData.password,
+          phone: demoData.phone,
+          role: demoData.role,
+          isActive: true,
+          isOnDuty: true,
+        })
+      } else {
+        user.password = demoData.password
+        user.role = demoData.role
+        await user.save()
+      }
     }
 
     if (!user) return res.status(401).json({ message: 'Invalid credentials. Use Quick Demo buttons or register.' })
