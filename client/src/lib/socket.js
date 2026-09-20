@@ -7,7 +7,8 @@ export function getSocket() {
     const stored = localStorage.getItem('mediroute-auth')
     const token = stored ? JSON.parse(stored)?.state?.token : null
 
-    socket = io('/', {
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || '/'
+    socket = io(socketUrl, {
       auth: { token },
       transports: ['websocket', 'polling'],
       autoConnect: true,
