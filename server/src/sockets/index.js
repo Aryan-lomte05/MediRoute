@@ -8,7 +8,9 @@ let io
 function initSockets(server) {
   io = new Server(server, {
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:5173',
+      origin: (origin, callback) => {
+        callback(null, true)
+      },
       credentials: true,
     },
     pingTimeout: 30000,

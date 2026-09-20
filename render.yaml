@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: mediroute-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        value: mediroute_super_secret_jwt_key_2026_emergency_response
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: MAPBOX_TOKEN
+        sync: false
+      - key: CLIENT_URL
+        value: https://mediroute-five.vercel.app
