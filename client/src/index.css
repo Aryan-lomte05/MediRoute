@@ -2,6 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   MEDIROUTE GLOBAL DESIGN SYSTEM & CYBER-MEDICAL STYLESHEET
+   Author: MediRoute Core Architecture Team
+   Tech: Tailwind CSS + Vanilla CSS3 GPU-Accelerated Micro-Animations
+   Theme: Next-Gen Emergency Medical Command & Real-time GIS
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. DESIGN TOKENS & CSS VARIABLES
+   -------------------------------------------------------------------------- */
+:root {
+  /* Core Palette */
+  --color-emergency: #FF2D4A;
+  --color-emergency-glow: rgba(255, 45, 74, 0.4);
+  --color-cyber-cyan: #00F5FF;
+  --color-cyber-glow: rgba(0, 245, 255, 0.4);
+  --color-trauma-purple: #A855F7;
+  --color-trauma-glow: rgba(168, 85, 247, 0.4);
+  --color-safe-emerald: #10B981;
+  --color-warning-amber: #F59E0B;
+  --color-bg-dark: #0A0A0F;
+  --color-surface-card: rgba(255, 255, 255, 0.03);
+  --color-border-card: rgba(255, 255, 255, 0.07);
+
+  /* Performance & Physics Easing */
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in-out-cubic: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* --------------------------------------------------------------------------
+   2. BASE RESETS & HARDWARE ACCELERATION
+   -------------------------------------------------------------------------- */
 @layer base {
   * {
     margin: 0;
@@ -12,208 +45,465 @@
   html {
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   body {
-    background-color: #0a0a0f;
+    background-color: var(--color-bg-dark);
     color: #ffffff;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     overflow-x: hidden;
+    min-height: 100vh;
+    selection-background-color: var(--color-emergency);
+    selection-color: #ffffff;
   }
 
+  /* Custom Neon Scrollbar */
   ::-webkit-scrollbar {
-    width: 4px;
+    width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: #0a0a0f;
+    background: #08080C;
   }
   ::-webkit-scrollbar-thumb {
-    background: #FF2D4A;
-    border-radius: 2px;
+    background: linear-gradient(180deg, #FF2D4A, #991B1B);
+    border-radius: 9999px;
+    transition: background 0.2s ease;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #FF4D6D;
+    box-shadow: 0 0 10px rgba(255, 45, 74, 0.8);
   }
 }
 
+/* --------------------------------------------------------------------------
+   3. GLASSMORPHISM & DYNAMIC CARD HOVER STATES
+   -------------------------------------------------------------------------- */
 @layer components {
-  /* Glassmorphism card */
+  /* Default Ultra-Frosted Glass Container */
   .glass-card {
-    @apply bg-white/[0.03] backdrop-blur-xl border border-white/[0.06] rounded-2xl;
+    background: rgba(18, 18, 28, 0.65);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    position: relative;
+    transition: transform 0.3s var(--ease-smooth),
+                box-shadow 0.3s var(--ease-smooth),
+                border-color 0.3s var(--ease-smooth),
+                background-color 0.3s var(--ease-smooth);
   }
 
+  /* Interactive Hover Card with Subtle Lift & Colored Border Sheen */
   .glass-card-hover {
-    @apply glass-card transition-all duration-300 hover:bg-white/[0.06] hover:border-white/10 hover:shadow-lg hover:shadow-emergency/10;
+    @apply glass-card;
+  }
+  .glass-card-hover:hover {
+    transform: translateY(-4px);
+    background: rgba(26, 26, 40, 0.8);
+    border-color: rgba(255, 45, 74, 0.3);
+    box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.7),
+                0 0 25px -5px rgba(255, 45, 74, 0.15);
   }
 
-  /* Glow effects */
-  .glow-red {
-    box-shadow: 0 0 20px rgba(255, 45, 74, 0.4), 0 0 60px rgba(255, 45, 74, 0.15);
+  /* Cyber Cyan Hover Card (Telemetry / Map Nodes) */
+  .glass-card-cyan-hover {
+    @apply glass-card;
   }
-  .glow-cyan {
-    box-shadow: 0 0 20px rgba(0, 245, 255, 0.4), 0 0 60px rgba(0, 245, 255, 0.15);
-  }
-  .glow-purple {
-    box-shadow: 0 0 20px rgba(124, 58, 237, 0.4), 0 0 60px rgba(124, 58, 237, 0.15);
-  }
-
-  /* Text glow */
-  .text-glow-red {
-    text-shadow: 0 0 20px rgba(255, 45, 74, 0.8), 0 0 40px rgba(255, 45, 74, 0.4);
-  }
-  .text-glow-cyan {
-    text-shadow: 0 0 20px rgba(0, 245, 255, 0.8), 0 0 40px rgba(0, 245, 255, 0.4);
+  .glass-card-cyan-hover:hover {
+    transform: translateY(-4px);
+    background: rgba(14, 28, 38, 0.8);
+    border-color: rgba(0, 245, 255, 0.35);
+    box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.7),
+                0 0 25px -5px rgba(0, 245, 255, 0.2);
   }
 
-  /* Neon button */
-  .btn-emergency {
-    @apply relative inline-flex items-center gap-2 px-8 py-4 bg-emergency font-display font-semibold text-white text-lg rounded-xl
-           transition-all duration-300 hover:scale-105 active:scale-95 overflow-hidden;
-    box-shadow: 0 0 30px rgba(255, 45, 74, 0.5), 0 0 60px rgba(255, 45, 74, 0.2);
+  /* Interactive Table Row Hover Effect */
+  .table-row-hover {
+    transition: background-color 0.2s ease, transform 0.2s ease;
   }
-  .btn-emergency::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 60%);
+  .table-row-hover:hover {
+    background-color: rgba(255, 255, 255, 0.04);
+    transform: translateX(2px);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   4. NEON GLOW UTILITIES & HOVER PROGRESSIONS
+   -------------------------------------------------------------------------- */
+/* Red / Critical Emergency Glows */
+.glow-red {
+  box-shadow: 0 0 20px rgba(255, 45, 74, 0.4), 0 0 50px rgba(255, 45, 74, 0.15);
+}
+.glow-red-hover {
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.glow-red-hover:hover {
+  box-shadow: 0 0 30px rgba(255, 45, 74, 0.6), 0 0 70px rgba(255, 45, 74, 0.25);
+  border-color: rgba(255, 45, 74, 0.6);
+}
+
+/* Cyan / GPS Route & Navigation Glows */
+.glow-cyan {
+  box-shadow: 0 0 20px rgba(0, 245, 255, 0.4), 0 0 50px rgba(0, 245, 255, 0.15);
+}
+.glow-cyan-hover {
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.glow-cyan-hover:hover {
+  box-shadow: 0 0 30px rgba(0, 245, 255, 0.6), 0 0 70px rgba(0, 245, 255, 0.25);
+  border-color: rgba(0, 245, 255, 0.6);
+}
+
+/* Purple / Trauma Bay & Hospital Glows */
+.glow-purple {
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.4), 0 0 50px rgba(168, 85, 247, 0.15);
+}
+.glow-purple-hover:hover {
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.6), 0 0 70px rgba(168, 85, 247, 0.25);
+  border-color: rgba(168, 85, 247, 0.6);
+}
+
+/* Glowing Typography */
+.text-glow-red {
+  text-shadow: 0 0 15px rgba(255, 45, 74, 0.8), 0 0 35px rgba(255, 45, 74, 0.35);
+}
+.text-glow-cyan {
+  text-shadow: 0 0 15px rgba(0, 245, 255, 0.8), 0 0 35px rgba(0, 245, 255, 0.35);
+}
+.text-glow-amber {
+  text-shadow: 0 0 15px rgba(245, 158, 11, 0.8), 0 0 35px rgba(245, 158, 11, 0.35);
+}
+
+/* --------------------------------------------------------------------------
+   5. BUTTON MICRO-INTERACTIONS & SHIMMER SWEEPS
+   -------------------------------------------------------------------------- */
+/* Primary Urgent SOS Button */
+.btn-emergency {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.75rem;
+  background: linear-gradient(135deg, #FF2D4A 0%, #E11D48 100%);
+  color: #ffffff;
+  font-weight: 700;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(255, 45, 74, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: transform 0.2s var(--ease-spring),
+              box-shadow 0.2s ease,
+              background 0.2s ease;
+  will-change: transform;
+}
+.btn-emergency:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 30px rgba(255, 45, 74, 0.65), 0 0 15px rgba(255, 45, 74, 0.4);
+}
+.btn-emergency:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 2px 10px rgba(255, 45, 74, 0.4);
+}
+
+/* Shimmer Light Reflection Sweep across Button on Hover */
+.btn-emergency::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transform: skewX(-25deg);
+  transition: none;
+}
+.btn-emergency:hover::before {
+  left: 140%;
+  transition: left 0.75s ease-in-out;
+}
+
+/* Ghost / Secondary Bordered Button with Cyber Hover Glow */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0.75rem;
+  cursor: pointer;
+  transition: all 0.25s var(--ease-smooth);
+}
+.btn-ghost:hover {
+  border-color: var(--color-cyber-cyan);
+  color: #ffffff;
+  background: rgba(0, 245, 255, 0.08);
+  box-shadow: 0 0 20px rgba(0, 245, 255, 0.25);
+  transform: translateY(-2px);
+}
+.btn-ghost:active {
+  transform: translateY(0);
+}
+
+/* --------------------------------------------------------------------------
+   6. SIDEBAR & NAVIGATION HOVER INTERACTIONS
+   -------------------------------------------------------------------------- */
+.sidebar-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+  overflow: hidden;
+}
+
+/* Hover State with Left Cyan/Red Indicator Accent */
+.sidebar-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 15%;
+  bottom: 15%;
+  width: 3px;
+  background: var(--color-emergency);
+  border-radius: 0 4px 4px 0;
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: opacity 0.2s ease, transform 0.2s var(--ease-spring);
+}
+.sidebar-item:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.05);
+  transform: translateX(4px);
+}
+.sidebar-item:hover::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+/* Active State */
+.sidebar-item.active {
+  color: #ffffff;
+  background: linear-gradient(90deg, rgba(255, 45, 74, 0.18) 0%, rgba(255, 45, 74, 0.04) 100%);
+  border: 1px solid rgba(255, 45, 74, 0.3);
+}
+.sidebar-item.active::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+/* --------------------------------------------------------------------------
+   7. EMERGENCY, RADAR & BEACON ANIMATIONS
+   -------------------------------------------------------------------------- */
+/* Real-time Radar Sonar Beacon Pulse */
+.pulse-dot {
+  position: relative;
+  display: inline-flex;
+  height: 0.75rem;
+  width: 0.75rem;
+}
+.pulse-dot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background-color: currentColor;
+  opacity: 0.75;
+  animation: radar-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.pulse-dot::after {
+  content: '';
+  position: relative;
+  display: inline-flex;
+  border-radius: 9999px;
+  height: 0.75rem;
+  width: 0.75rem;
+  background-color: currentColor;
+}
+
+@keyframes radar-ping {
+  75%, 100% {
+    transform: scale(2.6);
     opacity: 0;
-    transition: opacity 0.3s;
-  }
-  .btn-emergency:hover::before { opacity: 1; }
-
-  .btn-ghost {
-    @apply inline-flex items-center gap-2 px-6 py-3 border border-white/20 rounded-xl
-           font-medium text-white/80 transition-all duration-300
-           hover:border-cyber hover:text-cyber hover:bg-cyber/5;
-  }
-
-  /* Portal sidebar */
-  .sidebar-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
-           text-white/60 hover:text-white hover:bg-white/[0.05] cursor-pointer;
-  }
-  .sidebar-item.active {
-    @apply text-white bg-emergency/15 border border-emergency/30 text-emergency;
-  }
-
-  /* Status badge */
-  .badge-esi-1 { @apply bg-red-500/20 text-red-400 border border-red-500/40; }
-  .badge-esi-2 { @apply bg-orange-500/20 text-orange-400 border border-orange-500/40; }
-  .badge-esi-3 { @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/40; }
-  .badge-esi-4 { @apply bg-green-500/20 text-green-400 border border-green-500/40; }
-  .badge-esi-5 { @apply bg-blue-500/20 text-blue-400 border border-blue-500/40; }
-
-  /* Pulsing dot indicator */
-  .pulse-dot {
-    @apply relative inline-flex h-3 w-3;
-  }
-  .pulse-dot::before {
-    content: '';
-    @apply absolute inline-flex h-full w-full rounded-full bg-current opacity-75 animate-ping;
-  }
-  .pulse-dot::after {
-    content: '';
-    @apply relative inline-flex rounded-full h-3 w-3 bg-current;
-  }
-
-  /* Scan line overlay */
-  .scan-overlay::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(transparent 50%, rgba(0, 245, 255, 0.01) 50%);
-    background-size: 100% 4px;
-    pointer-events: none;
-    z-index: 1;
-  }
-
-  /* Stats metric card */
-  .metric-card {
-    @apply glass-card p-6 relative overflow-hidden;
-  }
-  .metric-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, #FF2D4A, transparent);
-  }
-
-  /* Map container */
-  .map-container {
-    @apply relative rounded-2xl overflow-hidden;
-    border: 1px solid rgba(255, 45, 74, 0.2);
-    box-shadow: 0 0 40px rgba(255, 45, 74, 0.1), inset 0 0 40px rgba(0,0,0,0.5);
-  }
-
-  /* Animated route line */
-  .route-animated {
-    stroke-dasharray: 8 4;
-    animation: dash 1.5s linear infinite;
-  }
-
-  /* Input */
-  .input-dark {
-    @apply w-full bg-surface-elevated border border-surface-border rounded-xl px-4 py-3
-           text-white placeholder-white/30 transition-all duration-200 outline-none
-           focus:border-emergency/60 focus:ring-2 focus:ring-emergency/20;
   }
 }
 
-/* Mapbox overrides */
-.mapboxgl-ctrl-logo { display: none !important; }
-.mapboxgl-ctrl-attrib { display: none !important; }
+/* High Urgency Siren Flash for Critical ESI-1 */
+.siren-blink {
+  animation: siren-alert 1.2s infinite ease-in-out;
+}
+@keyframes siren-alert {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px rgba(255, 45, 74, 0.9));
+  }
+  50% {
+    opacity: 0.4;
+    filter: drop-shadow(0 0 2px rgba(255, 45, 74, 0.2));
+  }
+}
+
+/* GPS Vector Flow Animation */
+.route-animated {
+  stroke-dasharray: 8 4;
+  animation: dash 1.2s linear infinite;
+}
+@keyframes dash {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* --------------------------------------------------------------------------
+   8. INPUT & FORM CONTROLS
+   -------------------------------------------------------------------------- */
+.input-dark {
+  width: 100%;
+  background: rgba(14, 14, 22, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+  padding: 0.875rem 1.125rem;
+  color: #ffffff;
+  font-size: 0.9375rem;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.input-dark::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+.input-dark:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(20, 20, 30, 0.9);
+}
+.input-dark:focus {
+  border-color: var(--color-emergency);
+  background: rgba(22, 22, 34, 0.95);
+  box-shadow: 0 0 0 3px rgba(255, 45, 74, 0.2), 0 0 15px rgba(255, 45, 74, 0.15);
+}
+
+/* --------------------------------------------------------------------------
+   9. ESI TRIAGE STATUS BADGES
+   -------------------------------------------------------------------------- */
+.badge-esi-1 {
+  background: rgba(239, 68, 68, 0.18);
+  color: #F87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.15);
+}
+.badge-esi-2 {
+  background: rgba(249, 115, 22, 0.18);
+  color: #FB923C;
+  border: 1px solid rgba(249, 115, 22, 0.4);
+}
+.badge-esi-3 {
+  background: rgba(234, 179, 8, 0.18);
+  color: #FACC15;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+}
+.badge-esi-4 {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ADE80;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+.badge-esi-5 {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60A5FA;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+/* --------------------------------------------------------------------------
+   10. MAPBOX 3D ENGINE OVERRIDES & TACTICAL HUD
+   -------------------------------------------------------------------------- */
+.mapboxgl-ctrl-logo,
+.mapboxgl-ctrl-attrib {
+  display: none !important;
+}
+
 .mapboxgl-popup-content {
-  background: #0f0f1a !important;
-  border: 1px solid #1e1e35 !important;
-  border-radius: 12px !important;
-  color: white !important;
-  padding: 12px 16px !important;
+  background: rgba(12, 12, 20, 0.92) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1px solid rgba(255, 45, 74, 0.3) !important;
+  border-radius: 0.75rem !important;
+  color: #ffffff !important;
+  padding: 1rem !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(255, 45, 74, 0.2) !important;
 }
-.mapboxgl-popup-tip { border-top-color: #1e1e35 !important; }
-
-/* Three.js canvas */
-canvas { display: block; }
-
-/* Custom animations */
-@keyframes ambulance-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+.mapboxgl-popup-tip {
+  border-top-color: rgba(255, 45, 74, 0.3) !important;
 }
 
-@keyframes route-flow {
-  0% { stroke-dashoffset: 200; }
-  100% { stroke-dashoffset: 0; }
+.map-container {
+  position: relative;
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 45, 74, 0.2);
+  box-shadow: 0 0 40px rgba(255, 45, 74, 0.1), inset 0 0 40px rgba(0, 0, 0, 0.6);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.map-container:hover {
+  border-color: rgba(255, 45, 74, 0.35);
+  box-shadow: 0 0 50px rgba(255, 45, 74, 0.18), inset 0 0 40px rgba(0, 0, 0, 0.6);
 }
 
-/* Hero gradient text */
+/* --------------------------------------------------------------------------
+   11. CYBERNETIC OVERLAYS & TEXT GRADIENTS
+   -------------------------------------------------------------------------- */
+/* Holographic Scanline Overlay */
+.scan-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(transparent 50%, rgba(0, 245, 255, 0.015) 50%);
+  background-size: 100% 4px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Subtle Film Grain Noise Texture */
+.noise-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Vibrant Hero Text Gradients */
 .gradient-text-emergency {
-  background: linear-gradient(135deg, #FF2D4A 0%, #FF6B7A 50%, #00F5FF 100%);
+  background: linear-gradient(135deg, #FF2D4A 0%, #FF6B7A 45%, #00F5FF 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-
 .gradient-text-cyber {
   background: linear-gradient(135deg, #00F5FF 0%, #7C3AED 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+.gradient-text-gold {
+  background: linear-gradient(135deg, #F59E0B 0%, #FBBF24 50%, #EF4444 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
 
-/* ESI level colors */
-.esi-1 { color: #FF2D4A; }
-.esi-2 { color: #FF8C00; }
-.esi-3 { color: #FFD700; }
-.esi-4 { color: #00C851; }
-.esi-5 { color: #007bff; }
-
-/* Noise texture overlay */
-.noise-overlay::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
-  opacity: 0.4;
-  pointer-events: none;
-  z-index: 0;
+/* Canvas Display */
+canvas {
+  display: block;
 }
