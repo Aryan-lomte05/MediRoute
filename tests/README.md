@@ -68,6 +68,12 @@ Each script exits non-zero if any check fails, so they drop into CI as-is.
   tab open will produce confusing failures. Start it with a fresh
   `--user-data-dir` for each run.
 
+- **Auth rate limiting.** `/api/auth` allows 20 attempts per 15 minutes, and
+  `browser-portals.cjs` signs in three times per run. Running the suites
+  repeatedly will exhaust that window; the portal suite then prints `SKIP` with
+  an explanation rather than reporting a false failure. Wait for the window to
+  reset, or raise the limit locally while iterating.
+
 - **CORS.** Outside `NODE_ENV=production` the API accepts any loopback origin,
   which is what lets `vite preview` on 4173 reach it. In production only the
   configured origins and Vercel preview subdomains are allowed, so a test run

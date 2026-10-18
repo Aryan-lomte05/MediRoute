@@ -233,7 +233,16 @@ async function main() {
     console.log('=============================================')
 
     const auth = await postJSON(API + '/auth/login', { email: r.email, password: r.password, role: r.role })
+
     if (!auth.token) {
+      // /api/auth is limited to 20 attempts per 15 minutes. Repeated suite runs
+      // exhaust it, which is the limiter working, not a regression. Say so
+      // plainly rather than reporting a portal failure.
+      if (/too many requests/i.test(auth.message || '')) {
+        console.log('  SKIP  ' + r.label + ' — auth rate limit reached (20 logins / 15 min).')
+        console.log('        Wait for the window to reset and re-run; this is not a failure.')
+        continue
+      }
       bad(r.label + ' login', JSON.stringify(auth).slice(0, 150))
       continue
     }
