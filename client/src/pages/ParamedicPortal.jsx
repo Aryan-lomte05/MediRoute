@@ -55,9 +55,16 @@ export default function ParamedicPortal() {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
   const [mapMode, setMapMode] = useState('3D') // '3D' | '2D'
-  const [etaMinutes, setEtaMinutes] = useState('05:40')
-  const [distanceKm, setDistanceKm] = useState('2.4')
-  const [ambulanceSpeed, setAmbulanceSpeed] = useState(76)
+  /**
+   * Navigation telemetry. These were fixed strings ('05:40', '2.4', 76) that no
+   * code ever updated, so the HUD displayed the same ETA, distance and speed
+   * on every run while presenting them as live turn-by-turn data. They are now
+   * derived from the device GPS and the server-computed route.
+   */
+  const [etaMinutes, setEtaMinutes] = useState(null)
+  const [distanceKm, setDistanceKm] = useState(null)
+  const [ambulanceSpeed, setAmbulanceSpeed] = useState(null)
+  const [gpsActive, setGpsActive] = useState(false)
 
   // Real Backend Data State
   const [activeAmbulance, setActiveAmbulance] = useState(null)
@@ -72,19 +79,18 @@ export default function ParamedicPortal() {
     gcs: 13,
   })
 
-  const [activeChecklist, setActiveChecklist] = useState([
-    { id: 1, text: "Administer 500 mL IV crystalloid bolus (Ringer's Lactate)", done: true },
-    { id: 2, text: 'Apply high-flow oxygen via non-rebreather mask (15 L/min)', done: true },
-    { id: 3, text: 'Control hemorrhage, apply tourniquet if extremity bleeding persists', done: false },
-    { id: 4, text: 'Notify trauma bay for priority surgical handoff', done: false },
-  ])
+  // Interventions for THIS patient, generated server-side from their triage
+  // and shared with the receiving ER. Previously a fixed four-item array that
+  // reset on reload and nobody else could see.
+  const [activeChecklist, setActiveChecklist] = useState([])
 
   // Dispatch & Workflow Status
   const [dispatchStatus, setDispatchStatus] = useState('EN_ROUTE_TO_HOSPITAL') // 'DISPATCHED' | 'AT_PATIENT' | 'EN_ROUTE_TO_HOSPITAL' | 'COMPLETED'
   const [isRecordingVoice, setIsRecordingVoice] = useState(false)
-  const [voiceNotes, setVoiceNotes] = useState([
-    'Patient has blunt abdominal trauma with suspected splenic laceration. IV access secured at left antecubital fossa.',
-  ])
+  const [voiceNotes, setVoiceNotes] = useState([])
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const recorderRef = useRef(null)
+  const audioChunksRef = useRef([])
 
   // Digital Clock
   useEffect(() => {
@@ -128,6 +134,13 @@ export default function ParamedicPortal() {
           if (active.triageData?.vitals) {
             setPatientVitals((v) => ({ ...v, ...active.triageData.vitals }))
           }
+          // Both boards belong to the incident, so they survive a reload and
+          // stay in step with the receiving ER.
+          setActiveChecklist(active.fieldChecklist || [])
+          setVoiceNotes(active.fieldNotes || [])
+        } else {
+          setActiveChecklist([])
+          setVoiceNotes([])
         }
       } catch (err) {
         console.warn('Paramedic data fetch error:', err.message)
@@ -138,6 +151,77 @@ export default function ParamedicPortal() {
     const interval = setInterval(fetchParamedicData, 15000)
     return () => clearInterval(interval)
   }, [])
+
+  /**
+   * Live GPS telemetry from the crew's own device.
+   *
+   * Does three things the HUD previously faked: reads real speed, computes the
+   * real remaining distance and ETA to the current destination, and pushes the
+   * unit's position to the server so the command centre and the patient's
+   * tracking page both see the ambulance actually moving.
+   *
+   * Throttled to one write every 8 seconds to stay well inside the API rate
+   * limit on a long transport.
+   */
+  useEffect(() => {
+    if (!('geolocation' in navigator)) return
+
+    let lastPush = 0
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setGpsActive(true)
+
+        const { longitude, latitude, speed } = pos.coords
+        // The Geolocation API reports speed in m/s, and null when stationary
+        // or unsupported.
+        setAmbulanceSpeed(speed != null ? Math.max(0, Math.round(speed * 3.6)) : null)
+
+        // Destination depends on the phase of the job: collect the patient
+        // first, then run to the receiving hospital.
+        const heading = ['EN_ROUTE_TO_HOSPITAL', 'ARRIVED_AT_HOSPITAL'].includes(dispatchStatus)
+          ? activeIncident?.allocatedHospital?.location?.coordinates
+          : activeIncident?.location?.coordinates
+
+        if (Array.isArray(heading) && heading.length === 2) {
+          const R = 6371
+          const toRad = (d) => (d * Math.PI) / 180
+          const dLat = toRad(heading[1] - latitude)
+          const dLng = toRad(heading[0] - longitude)
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(latitude)) * Math.cos(toRad(heading[1])) * Math.sin(dLng / 2) ** 2
+          const km = 2 * R * Math.asin(Math.sqrt(a))
+
+          setDistanceKm(km.toFixed(1))
+          // Use the measured speed when actually moving, else an urban average.
+          const kmh = speed != null && speed * 3.6 > 5 ? speed * 3.6 : 28
+          setEtaMinutes(Math.max(1, Math.round((km / kmh) * 60)))
+        }
+
+        const now = Date.now()
+        if (activeAmbulance?._id && now - lastPush > 8000) {
+          lastPush = now
+          api
+            .patch(`/ambulances/${activeAmbulance._id}/location`, {
+              coordinates: [longitude, latitude],
+              heading: pos.coords.heading ?? null,
+              speed: speed != null ? Math.round(speed * 3.6) : null,
+            })
+            .catch(() => {
+              // A dropped telemetry write is not worth interrupting the crew.
+            })
+        }
+      },
+      (err) => {
+        console.warn('[Paramedic] GPS unavailable:', err.message)
+        setGpsActive(false)
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    )
+
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [activeAmbulance?._id, activeIncident?._id, dispatchStatus])
 
   // Socket.IO listeners
   useEffect(() => {
@@ -365,20 +449,95 @@ export default function ParamedicPortal() {
     }
   }
 
-  // Action: Voice Log with Whisper STT
-  const handleVoiceLog = () => {
-    if (!isRecordingVoice) {
-      setIsRecordingVoice(true)
-      toast('Listening to paramedic voice log via Whisper...', { icon: '🎙️' })
-      setTimeout(async () => {
-        setIsRecordingVoice(false)
-        const newNote = `[${currentTime}] IV bolus infused. Patient vitals stabilized. Direct handoff ready.`
-        setVoiceNotes((prev) => [newNote, ...prev])
-        if (activeIncident?._id) {
-          await api.patch(`/incidents/${activeIncident._id}/status`, { notes: newNote }).catch(() => {})
+  /**
+   * Record the crew's dictation and transcribe it with Whisper server-side.
+   *
+   * This replaces a simulated handler that waited three seconds and inserted a
+   * fixed sentence while reporting that speech had been transcribed. Audio is
+   * posted as a raw body to /ai/transcribe, then the text is appended to the
+   * incident so the receiving ER sees it immediately.
+   */
+  const handleVoiceLog = async () => {
+    // Second tap stops the recording.
+    if (isRecordingVoice) {
+      if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+      setIsRecordingVoice(false)
+      return
+    }
+
+    if (!activeIncident?._id) {
+      toast.error('No active incident to attach a note to')
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioChunksRef.current = []
+
+      const recorder = new MediaRecorder(stream)
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+
+        if (blob.size < 1200) {
+          toast.error('Recording too short')
+          return
         }
-        toast.success('Whisper STT: Voice note transcribed & synced to medical chart!')
-      }, 3000)
+
+        setIsTranscribing(true)
+        try {
+          const { data } = await api.post('/ai/transcribe', blob, {
+            headers: { 'Content-Type': blob.type || 'audio/webm' },
+            timeout: 60000,
+          })
+
+          if (!data.transcript) {
+            toast.error('No speech detected')
+            return
+          }
+
+          const { data: saved } = await api.post(`/incidents/${activeIncident._id}/notes`, {
+            text: data.transcript,
+            source: 'VOICE',
+          })
+          setVoiceNotes(saved.fieldNotes || [])
+          toast.success('Note transcribed and sent to the ER')
+        } catch {
+          toast.error('Could not transcribe that recording')
+        } finally {
+          setIsTranscribing(false)
+        }
+      }
+
+      recorder.start()
+      recorderRef.current = recorder
+      setIsRecordingVoice(true)
+    } catch {
+      toast.error('Microphone unavailable')
+    }
+  }
+
+  /** Persist a field-intervention tick, shared with the receiving ER. */
+  const toggleFieldChecklist = async (item) => {
+    if (!activeIncident?._id) return
+    const next = !item.done
+
+    setActiveChecklist((prev) => prev.map((c) => (c.key === item.key ? { ...c, done: next } : c)))
+
+    try {
+      const { data } = await api.patch(`/incidents/${activeIncident._id}/checklist`, {
+        board: 'field',
+        key: item.key,
+        done: next,
+      })
+      setActiveChecklist(data.fieldChecklist || [])
+    } catch {
+      setActiveChecklist((prev) => prev.map((c) => (c.key === item.key ? { ...c, done: item.done } : c)))
+      toast.error('Could not save that step')
     }
   }
 
@@ -543,22 +702,29 @@ export default function ParamedicPortal() {
               DESTINATION FACILITY
             </div>
             <div className="text-base font-extrabold text-white leading-tight truncate">
-              {activeIncident?.allocatedHospital?.name || 'Lilavati Hospital & Research Centre'}{' '}
-              <span className="text-cyan-400 font-normal">— Bay 01</span>
+              {activeIncident?.allocatedHospital?.name || 'No hospital allocated yet'}
             </div>
-            <div className="text-xs text-white/50 leading-tight mt-0.5">Bandra West, Mumbai</div>
+            <div className="text-xs text-white/50 leading-tight mt-0.5">
+              {activeIncident?.allocatedHospital?.location?.address || '—'}
+            </div>
 
             <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[9px] font-mono font-semibold">
-              <span className="px-2 py-0.5 rounded bg-red-950/60 border border-red-500/40 text-red-300">
-                ICU Ready
-              </span>
-              <span className="px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/40 text-cyan-300">
-                {etaMinutes} min ETA
-              </span>
-              <span className="px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                Trauma Team Notified
-              </span>
+              {(activeIncident?.allocatedHospital?.resources?.icuBeds?.available ?? 0) > 0 && (
+                <span className="px-2 py-0.5 rounded bg-red-950/60 border border-red-500/40 text-red-300">
+                  {activeIncident.allocatedHospital.resources.icuBeds.available} ICU free
+                </span>
+              )}
+              {etaMinutes != null && (
+                <span className="px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/40 text-cyan-300">
+                  {etaMinutes} min ETA
+                </span>
+              )}
+              {activeIncident?.prepChecklist?.some((c) => c.key === 'team-alerted' && c.done) && (
+                <span className="px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  Receiving team briefed
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -569,13 +735,21 @@ export default function ParamedicPortal() {
             <div className="flex items-baseline gap-2">
               <span className="text-[10px] font-mono text-white/40 uppercase font-semibold">ETA</span>
               <span className="text-3xl font-extrabold text-emerald-400 font-mono tracking-tight">
-                {etaMinutes} <span className="text-sm font-sans font-medium text-emerald-300/70">min</span>
+                {etaMinutes ?? '--'}{' '}
+                <span className="text-sm font-sans font-medium text-emerald-300/70">min</span>
               </span>
             </div>
             <div className="flex items-center gap-3 text-[11px] font-mono text-white/60 mt-0.5">
-              <span>Distance <strong className="text-white">{distanceKm} km</strong></span>
+              <span>
+                Distance <strong className="text-white">{distanceKm ?? '--'} km</strong>
+              </span>
               <span>·</span>
-              <span>Speed: <strong className="text-cyan-300">{ambulanceSpeed} km/h</strong></span>
+              <span>
+                Speed:{' '}
+                <strong className="text-cyan-300">
+                  {ambulanceSpeed != null ? ambulanceSpeed + ' km/h' : gpsActive ? 'stationary' : 'no GPS'}
+                </strong>
+              </span>
             </div>
 
             <div className="flex items-center gap-2 mt-2">
@@ -838,14 +1012,16 @@ export default function ParamedicPortal() {
           </div>
 
           <div className="space-y-3">
+            {activeChecklist.length === 0 && (
+              <p className="text-sm font-mono text-white/35">
+                Interventions appear here once a patient is assigned and triaged. The list is
+                generated from that patient&apos;s presentation.
+              </p>
+            )}
             {activeChecklist.map((item) => (
               <div
-                key={item.id}
-                onClick={() =>
-                  setActiveChecklist((prev) =>
-                    prev.map((c) => (c.id === item.id ? { ...c, done: !c.done } : c))
-                  )
-                }
+                key={item.key}
+                onClick={() => toggleFieldChecklist(item)}
                 className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
                   item.done
                     ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
@@ -854,7 +1030,7 @@ export default function ParamedicPortal() {
               >
                 <div className="flex items-center gap-3 font-mono text-sm">
                   <span className="text-lg">{item.done ? '☑' : '☐'}</span>
-                  <span>{item.text}</span>
+                  <span>{item.label}</span>
                 </div>
                 <span className="text-xs font-mono text-white/40">{item.done ? 'COMPLETED' : 'PENDING'}</span>
               </div>
@@ -885,17 +1061,45 @@ export default function ParamedicPortal() {
               🎙️
             </button>
             <div className="text-sm font-bold text-white">
-              {isRecordingVoice ? 'Listening & Transcribing via OpenAI Whisper...' : 'Tap to Start Hands-Free Dictation'}
+              {isTranscribing
+                ? 'Transcribing with Whisper...'
+                : isRecordingVoice
+                ? 'Recording - tap again to stop'
+                : 'Tap to dictate a note'}
             </div>
           </div>
 
           <div className="space-y-3">
             <div className="text-xs font-mono text-white/40 uppercase font-semibold">Transcribed Voice Notes</div>
-            {voiceNotes.map((note, idx) => (
-              <div key={idx} className="p-4 rounded-xl bg-white/[0.03] border border-white/10 font-mono text-xs text-white/80 leading-relaxed">
-                {note}
-              </div>
-            ))}
+            {voiceNotes.length === 0 && (
+              <p className="text-sm font-mono text-white/35">
+                No notes recorded for this patient yet.
+              </p>
+            )}
+            {voiceNotes
+              .slice()
+              .reverse()
+              .map((note, idx) => (
+                <div
+                  key={note._id || idx}
+                  className="p-4 rounded-xl bg-white/[0.03] border border-white/10 font-mono text-xs text-white/80 leading-relaxed"
+                >
+                  <div className="flex items-center justify-between text-[10px] text-white/40 mb-1.5">
+                    <span>
+                      {note.at
+                        ? new Date(note.at).toLocaleTimeString('en-IN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false,
+                          })
+                        : ''}
+                      {note.by ? ' · ' + note.by : ''}
+                    </span>
+                    <span>{note.source === 'VOICE' ? 'DICTATED' : 'TYPED'}</span>
+                  </div>
+                  {note.text}
+                </div>
+              ))}
           </div>
         </div>
       )}

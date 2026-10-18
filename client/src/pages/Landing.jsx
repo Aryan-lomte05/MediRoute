@@ -1,3 +1,23 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - PRODUCT SHOWCASE & TACTICAL GIS LANDING PAGE (Landing.jsx)
+ * ==============================================================================
+ * 
+ * WHAT IS WHERE:
+ * - Line 25-35:    Module Imports & Mapbox GL Token Initialization
+ * - Line 36-170:   Hero 3D Mapbox Engine (`heroMapRef`):
+ *                  - Live Mumbai traffic layer (Green/Amber/Red congestion lines)
+ *                  - Mumbai Sea Link Green Corridor path vector
+ *                  - Dynamic Patient ESI-1, Trauma Center, and Animated 🚑 Ambulance markers
+ * - Line 171-240:  `portalCards` Dataset: Role showcase configurations (Citizen, Paramedic, ER, City Command)
+ * - Line 241-380:  Global Navigation Header: Brand logo, live telemetry ticker, Launch App CTA
+ * - Line 381-540:  Hero Section: Headline, ESI-1 triage stats, live 3D Mapbox viewport HUD
+ * - Line 541-710:  Interactive 4-Portal Grid: Cyber glassmorphism cards with direct portal routing
+ * - Line 711-850:  Platform Architecture: Groq AI triage, dynamic bed matrix, smart traffic pre-emption
+ * - Line 851-End:  Footer, Privacy/Terms Modals, and Deployment Status Badges
+ * ==============================================================================
+ */
+
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'

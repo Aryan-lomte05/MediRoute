@@ -1,3 +1,23 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - INTERACTIVE MULTI-ROLE AUTHENTICATION PORTAL (LoginPage.jsx)
+ * ==============================================================================
+ * 
+ * WHAT IS WHERE:
+ * - Line 25-35:    Core Libraries & Framer Motion Imports
+ * - Line 36-105:   Role Config (`ROLE_CONFIG`): 3D camera angles, color themes, routes
+ * - Line 106-115:  Demo Credentials (`DEMO_CREDENTIALS`): One-click pre-filled auth
+ * - Line 116-160:  Feature Badges (`CAPABILITIES`) & Geographic Corridor Coordinates
+ * - Line 165-200:  Component State & Mapbox Refs (`telemetry`, `form`, `selectedRole`)
+ * - Line 201-380:  Mapbox GL 3D Map Engine & Camera flyTo Animation Loop
+ * - Line 381-440:  Auth Handlers: Login, Register, Role switching, Error toast alerts
+ * - Line 441-End:  Render Layout:
+ *                  - Background: Real-time 3D Mapbox GIS with Mumbai Sea Link corridor
+ *                  - HUD Overlay: Active GPS coordinate streamer & vehicle velocity
+ *                  - Glassmorphism Modal: Quick role switcher, form inputs, submit button
+ * ==============================================================================
+ */
+
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'

@@ -1,3 +1,29 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - CITIZEN EMERGENCY SOS & LIVE AMBULANCE TRACKING PWA (PatientPortal.jsx)
+ * ==============================================================================
+ * 
+ * WHAT IS WHERE:
+ * - Line 25-35:    Core Module & Realtime Socket Imports (`api`, `socket`, `routing`)
+ * - Line 36-45:    `EMERGENCY_TYPES`: Categorized emergency triggers (Cardiac, Accident, Stroke)
+ * - Line 46-105:   `FIRST_AID_TOPICS`: Interactive step-by-step first responder medical protocols
+ * - Line 106-180:  Component State: Active tab, SOS countdown, GPS coords, assigned ambulance & ETA
+ * - Line 181-350:  Live Mapbox 3D Engine:
+ *                  - Citizen GPS location ping with pulsating radar ring
+ *                  - Approaching ALS Ambulance real-time vector animation
+ *                  - Target Trauma Center receiving hospital beacon
+ * - Line 351-460:  Core SOS Dispatch Handlers:
+ *                  - `handleInstantSos`: Dispatches emergency to cloud backend & Socket.IO rooms
+ *                  - `triggerOfflineSmsFallback`: SMS dispatch if mobile data fails
+ *                  - `cancelEmergency`: Verified cancellation flow
+ * - Line 461-End:  Render Layout & Sub-Navigation:
+ *                  - Tab 1: Instant SOS Command (Pulsating trigger + emergency classification)
+ *                  - Tab 2: Live Tracking HUD (Mapbox 3D vector route + driver direct dial)
+ *                  - Tab 3: Interactive First Aid Protocols (CPR, Bleeding, Heimlich)
+ *                  - Tab 4: Citizen Emergency Medical Profile (Blood group, allergies, Next-of-Kin)
+ * ==============================================================================
+ */
+
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import mapboxgl from 'mapbox-gl'

@@ -168,6 +168,66 @@ async function allocateHospital(incident) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// HANDOVER CHECKLISTS
+// ──────────────────────────────────────────────────────────────────────────────
+
+const slug = (text, i) =>
+  `${String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}-${i}`
+
+/**
+ * Field interventions for the crew, taken from the triage engine's
+ * recommendations for this specific patient.
+ */
+function buildFieldChecklist(triage) {
+  const items = (triage.recommendedActions || []).map((label, i) => ({
+    key: slug(label, i),
+    label,
+    done: false,
+  }))
+
+  // Always close with the handover step, whatever the presentation.
+  items.push({ key: 'handover', label: 'Hand over to receiving ER team', done: false })
+  return items
+}
+
+/**
+ * Pre-arrival preparation for the receiving hospital. Steps are added based on
+ * the specialties and hazards this patient actually needs, so a cardiac case
+ * does not get a laparotomy suite reserved.
+ */
+function buildPrepChecklist(triage) {
+  const specialties = triage.requiredSpecialties || []
+  const items = [{ key: 'team-alerted', label: 'Receiving team alerted and briefed', done: false }]
+
+  if (specialties.includes('CARDIAC_CATH_LAB')) {
+    items.push({ key: 'cath-lab', label: 'Cardiac cath lab placed on standby', done: false })
+    items.push({ key: 'ecg', label: '12-lead ECG ready at the bay', done: false })
+  }
+  if (specialties.includes('LEVEL_1_TRAUMA')) {
+    items.push({ key: 'trauma-bay', label: 'Trauma bay cleared and equipped', done: false })
+    items.push({ key: 'blood-crossmatch', label: 'Crossmatch samples and O-negative units ready', done: false })
+  }
+  if (specialties.includes('STROKE_CENTER')) {
+    items.push({ key: 'ct-priority', label: 'CT scanner cleared for priority imaging', done: false })
+    items.push({ key: 'stroke-team', label: 'Stroke team paged for thrombolysis decision', done: false })
+  }
+  if (specialties.includes('BURN_UNIT')) {
+    items.push({ key: 'burn-unit', label: 'Burn unit notified, warmed fluids prepared', done: false })
+  }
+  if (specialties.includes('NEUROSURGERY')) {
+    items.push({ key: 'neuro-oncall', label: 'Neurosurgery on-call consultant contacted', done: false })
+  }
+  if (specialties.includes('ICU')) {
+    items.push({ key: 'icu-bed', label: 'ICU bed and ventilator reserved', done: false })
+  }
+  if (triage.esiLevel <= 2) {
+    items.push({ key: 'resus-bay', label: 'Resuscitation bay assigned', done: false })
+  }
+
+  return items
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // DISPATCH PIPELINE
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -203,6 +263,11 @@ async function runDispatchPipeline(incidentId, io) {
       'triageData.triagedAt': new Date(),
       status: 'TRIAGE_COMPLETE',
       'timestamps.triageCompleted': new Date(),
+      // Seed both handover boards from this patient's actual triage, so the
+      // crew and the receiving ER work the same case-specific list instead of
+      // a fixed protocol hardcoded in each portal.
+      fieldChecklist: buildFieldChecklist(triage),
+      prepChecklist: buildPrepChecklist(triage),
     })
 
     console.log(`[Dispatch] ${incident.incidentNumber} triaged ESI ${triage.esiLevel} via ${triage.engine}`)
@@ -725,6 +790,88 @@ router.patch('/:id/status', optionalAuth, async (req, res, next) => {
     }
 
     res.json({ incident })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PATCH /api/incidents/:id/checklist - tick a handover step (staff only)
+// ──────────────────────────────────────────────────────────────────────────────
+// Body: { board: 'field' | 'prep', key: string, done: boolean }
+// Both boards are shared state across the handover: when the crew completes an
+// intervention the receiving ER sees it, and vice versa.
+router.patch('/:id/checklist', auth, authorize(...STAFF_ROLES), async (req, res, next) => {
+  try {
+    const { board, key, done } = req.body
+
+    if (!['field', 'prep'].includes(board)) {
+      return res.status(400).json({ message: "board must be 'field' or 'prep'" })
+    }
+    if (!key) return res.status(400).json({ message: 'key is required' })
+
+    const field = board === 'field' ? 'fieldChecklist' : 'prepChecklist'
+
+    const incident = await Incident.findOneAndUpdate(
+      { _id: req.params.id, [`${field}.key`]: key },
+      {
+        $set: {
+          [`${field}.$.done`]: Boolean(done),
+          [`${field}.$.doneAt`]: done ? new Date() : null,
+          [`${field}.$.doneBy`]: done ? req.user.name : null,
+        },
+      },
+      { new: true }
+    )
+
+    if (!incident) return res.status(404).json({ message: 'Incident or checklist item not found' })
+
+    const io = req.app.get('io')
+    if (io) {
+      const payload = { incidentId: incident._id, board, key, done: Boolean(done), by: req.user.name }
+      for (const room of [`incident_${incident._id}`, 'hospital', 'paramedic', 'admin']) {
+        io.to(room).emit('checklist_updated', payload)
+      }
+    }
+
+    res.json({ [field]: incident[field] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/incidents/:id/notes - record a crew observation (staff only)
+// ──────────────────────────────────────────────────────────────────────────────
+router.post('/:id/notes', auth, authorize(...STAFF_ROLES), async (req, res, next) => {
+  try {
+    const { text, source } = req.body
+    if (!text || !String(text).trim()) return res.status(400).json({ message: 'text is required' })
+
+    const note = {
+      text: String(text).trim().slice(0, 2000),
+      at: new Date(),
+      by: req.user.name,
+      source: source === 'VOICE' ? 'VOICE' : 'TYPED',
+    }
+
+    const incident = await Incident.findByIdAndUpdate(
+      req.params.id,
+      { $push: { fieldNotes: note } },
+      { new: true }
+    )
+
+    if (!incident) return res.status(404).json({ message: 'Incident not found' })
+
+    const io = req.app.get('io')
+    if (io) {
+      // The receiving ER wants crew notes as they are dictated, not at handover.
+      for (const room of [`incident_${incident._id}`, 'hospital', 'admin']) {
+        io.to(room).emit('field_note_added', { incidentId: incident._id, note })
+      }
+    }
+
+    res.status(201).json({ fieldNotes: incident.fieldNotes })
   } catch (err) {
     next(err)
   }

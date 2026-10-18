@@ -58,6 +58,18 @@ const ESI_WORD = {
 }
 
 /**
+ * How long a bay has been in its current state, from the real timestamp the
+ * server records. The board previously showed fixed strings like "40m".
+ */
+function dwellTime(since) {
+  if (!since) return ''
+  const mins = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 60000))
+  if (mins < 60) return mins + 'm'
+  const h = Math.floor(mins / 60)
+  return h + 'h ' + (mins % 60) + 'm'
+}
+
+/**
  * One vital sign. Renders "Not recorded" when the value is absent rather than
  * substituting a plausible number, so staff can tell measured data apart from
  * missing data at a glance.
@@ -89,7 +101,9 @@ export default function HospitalPortal() {
   const [currentTime, setCurrentTime] = useState(() =>
     new Date().toLocaleTimeString('en-IN', { hour12: false })
   )
-  const [currentDate, setCurrentDate] = useState('Thu, 19 Sep 2026')
+  const [currentDate, setCurrentDate] = useState(() =>
+    new Date().toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+  )
 
   // Real Hospital Data State
   const [hospitalData, setHospitalData] = useState(null)
@@ -108,105 +122,101 @@ export default function HospitalPortal() {
   const mapInstanceRef = useRef(null)
 
   // Resource Inventory State
-  const [bloodBank, setBloodBank] = useState({
-    oNeg: 18,
-    aPos: 42,
-    bPos: 35,
-    plasma: 24,
-  })
-  const [ventilatorCount, setVentilatorCount] = useState(14)
+  // Blood stock lives on the hospital record, so a request for units persists
+  // and every other portal sees it.
+  const [bloodBank, setBloodBank] = useState(null)
+  const [ventilators, setVentilators] = useState(null)
 
   // Pre-Arrival Preparation Checklist
-  const [checklist, setChecklist] = useState([
-    { id: 1, label: 'Blood Bank Notified (O-Neg 4 Units)', time: '20:24', done: true },
-    { id: 2, label: 'CT Scanner Cleared & Standby', time: '20:25', done: true },
-    { id: 3, label: 'Trauma Surgery Attending Present', time: 'Pending', done: false, canNotify: true },
-    { id: 4, label: 'OR Suite 02 Cleared for Laparotomy', time: 'Pending', done: false, canNotify: true },
-    { id: 5, label: 'Crossmatch Samples Prepared', time: '20:26', done: true },
-    { id: 6, label: 'ICU Bed Reserved (Trauma Ward)', time: 'Pending', done: false, canReserve: true },
-  ])
+  // Pre-arrival steps for the actual inbound patient, generated server-side
+  // from that patient's triage. Previously a fixed array that reset on reload
+  // and was invisible to the crew.
+  const [checklist, setChecklist] = useState([])
 
-  // Sister Regional Hospitals for Mutual Aid
-  const [sisterHospitals, setSisterHospitals] = useState([
-    { id: '1', name: 'KEM Hospital (Parel)', icu: '3/32', trauma: '6/15', status: 'NORMAL', eta: '8 min' },
-    { id: '2', name: 'Sion Hospital (LTMGH)', icu: '6/24', trauma: '4/12', status: 'NORMAL', eta: '11 min' },
-    { id: '3', name: 'Kokilaben Dhirubhai Ambani', icu: '4/20', trauma: '5/10', status: 'NORMAL', eta: '14 min' },
-    { id: '4', name: 'Holy Family Hospital', icu: '2/18', trauma: '3/8', status: 'DIVERT', eta: '6 min' },
-  ])
+  // Regional mutual-aid network, read from the hospitals collection rather
+  // than a hardcoded list with invented bed counts.
+  const [sisterHospitals, setSisterHospitals] = useState([])
 
-  // 20 ER Bays Grid
-  const [bays, setBays] = useState([
-    { id: 1, name: 'Bay 01', status: 'incoming', unit: 'MH-AMB-002', eta: '4 min', complaint: 'Penetrating Trauma', esi: 1, doctor: 'Trauma Team' },
-    { id: 2, name: 'Bay 02', status: 'occupied', complaint: 'Head Injury', doctor: 'Dr. Shah', time: '40m', esi: 2 },
-    { id: 3, name: 'Bay 03', status: 'available', complaint: '—', doctor: '—', time: '—' },
-    { id: 4, name: 'Bay 04', status: 'occupied', complaint: 'Resp. Distress', doctor: 'Dr. Kapoor', time: '42m', esi: 3 },
-    { id: 5, name: 'Bay 05', status: 'cleaning', complaint: 'ETA 15m', doctor: 'Staff', time: '15m' },
-    { id: 6, name: 'Bay 06', status: 'occupied', complaint: 'Abdominal Pain', doctor: 'Dr. Iyer', time: '1h 5m', esi: 2 },
-    { id: 7, name: 'Bay 07', status: 'available', complaint: '—', doctor: '—', time: '—' },
-    { id: 8, name: 'Bay 08', status: 'occupied', complaint: 'Polytrauma', doctor: 'Dr. Mehta', time: '28m', esi: 1 },
-    { id: 9, name: 'Bay 09', status: 'available', complaint: '—', doctor: '—', time: '—' },
-    { id: 10, name: 'Bay 10', status: 'occupied', complaint: 'Fracture', doctor: 'Dr. Khan', time: '2h 10m', esi: 3 },
-    { id: 11, name: 'Bay 11', status: 'available', complaint: '—', doctor: '—', time: '—' },
-    { id: 12, name: 'Bay 12', status: 'occupied', complaint: 'Asthma', doctor: 'Dr. Patel', time: '1h 48m', esi: 4 },
-    { id: 13, name: 'Bay 13', status: 'cleaning', complaint: 'ETA 10m', doctor: 'Staff', time: '10m' },
-    { id: 14, name: 'Bay 14', status: 'available', complaint: '—', doctor: '—', time: '—' },
-    { id: 15, name: 'Bay 15', status: 'occupied', complaint: 'Stroke (R/O)', doctor: 'Dr. Desai', time: '55m', esi: 2 },
-    { id: 16, name: 'Bay 16', status: 'available', complaint: '—', doctor: '—', time: '—' },
-    { id: 17, name: 'Bay 17', status: 'occupied', complaint: 'Chest Pain', doctor: 'Dr. Nair', time: '1h 20m', esi: 3 },
-    { id: 18, name: 'Bay 18', status: 'available', complaint: '—', doctor: '—', time: '—' },
-    { id: 19, name: 'Bay 19', status: 'occupied', complaint: 'Minor Injury', doctor: 'Dr. Limaye', time: '3h 15m', esi: 5 },
-    { id: 20, name: 'Bay 20', status: 'available', complaint: '—', doctor: '—', time: '—' },
-  ])
+  // Resuscitation bays for THIS hospital, from its own record. The board was
+  // previously a fixed 20-bay array, identical for every hospital.
+  const [bays, setBays] = useState([])
 
   // Digital Clock
   useEffect(() => {
     const updateTime = () => {
       const now = new Date()
       setCurrentTime(now.toLocaleTimeString('en-IN', { hour12: false }))
-      setCurrentDate('Thu, 19 Sep 2026')
+      setCurrentDate(
+        now.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+      )
     }
     updateTime()
     const timer = setInterval(updateTime, 1000)
     return () => clearInterval(timer)
   }, [])
 
-  // Fetch real hospital and incident data from MongoDB
+  // Fetch real hospital, network and incident data from MongoDB
   useEffect(() => {
     const fetchHospitalData = async () => {
       try {
-        const [hospRes, incRes] = await Promise.all([
+        const [hospRes, incRes, allHospRes] = await Promise.all([
           api.get('/hospitals/primary'),
           api.get('/incidents?limit=20'),
+          api.get('/hospitals'),
         ])
 
-        if (hospRes.data?.hospital) {
-          const h = hospRes.data.hospital
+        const h = hospRes.data?.hospital
+        if (h) {
           setHospitalData(h)
-          setIcuAvailable(h.resources?.icuBeds?.available ?? 5)
-          setErAvailable(h.resources?.traumaBeds?.available ?? 8)
+          setIcuAvailable(h.resources?.icuBeds?.available ?? 0)
+          setErAvailable(h.resources?.traumaBeds?.available ?? 0)
           setIntakeStatus(h.queueStatus?.diversionStatus ? 'DIVERT' : 'NORMAL')
+          setBloodBank(h.bloodBank || null)
+          setVentilators(h.resources?.ventilators || null)
+
+          // Bays come from this hospital's own record.
+          setBays(
+            (h.erBays || [])
+              .slice()
+              .sort((a, b) => a.number - b.number)
+              .map((b) => ({
+                id: b.number,
+                name: `Bay ${String(b.number).padStart(2, '0')}`,
+                status: (b.status || 'AVAILABLE').toLowerCase(),
+                complaint: b.label || '',
+                doctor: b.doctor || '',
+                since: b.since || null,
+                incident: b.incident || null,
+              }))
+          )
         }
 
-        if (incRes.data?.incidents?.length) {
-          const incoming = incRes.data.incidents.find((i) =>
-            ['DISPATCHED', 'TRIAGE_COMPLETE', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL'].includes(i.status)
+        // Mutual-aid network: every other active hospital, with its real
+        // capacity and distance-free ETA left to the allocation engine.
+        if (allHospRes.data?.hospitals) {
+          setSisterHospitals(
+            allHospRes.data.hospitals
+              .filter((x) => String(x._id) !== String(h?._id))
+              .map((x) => ({
+                id: x._id,
+                name: x.name,
+                icu: `${x.resources?.icuBeds?.available ?? 0}/${x.resources?.icuBeds?.total ?? 0}`,
+                trauma: `${x.resources?.traumaBeds?.available ?? 0}/${x.resources?.traumaBeds?.total ?? 0}`,
+                status: x.queueStatus?.diversionStatus ? 'DIVERT' : 'NORMAL',
+                wait: x.queueStatus?.erWaitTimeMinutes ?? null,
+                capabilities: x.capabilities || [],
+              }))
           )
-          if (incoming) {
-            setInboundIncident(incoming)
-            setBays((prev) =>
-              prev.map((b) =>
-                b.id === 1
-                  ? {
-                      ...b,
-                      unit: incoming.assignedAmbulance?.vehicleNumber || 'MH-AMB-002',
-                      complaint: incoming.triageData?.chiefComplaint || 'Acute Trauma',
-                      esi: incoming.triageData?.esiLevel || 1,
-                    }
-                  : b
-              )
-            )
-          }
         }
+
+        const incidents = incRes.data?.incidents || []
+        const incoming = incidents.find((i) =>
+          ['DISPATCHED', 'TRIAGE_COMPLETE', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL'].includes(i.status)
+        )
+
+        setInboundIncident(incoming || null)
+        // The prep board is this patient's own, generated from their triage.
+        setChecklist(incoming?.prepChecklist || [])
       } catch (err) {
         console.warn('Hospital fetch warning:', err.message)
       }
@@ -216,6 +226,63 @@ export default function HospitalPortal() {
     const interval = setInterval(fetchHospitalData, 20000)
     return () => clearInterval(interval)
   }, [])
+
+  /** Persist a prep-checklist tick so the crew and command centre both see it. */
+  const toggleChecklistItem = async (item) => {
+    if (!inboundIncident?._id) return
+    const next = !item.done
+
+    // Optimistic: an ER checklist must feel instant under pressure.
+    setChecklist((prev) => prev.map((c) => (c.key === item.key ? { ...c, done: next } : c)))
+
+    try {
+      const { data } = await api.patch(`/incidents/${inboundIncident._id}/checklist`, {
+        board: 'prep',
+        key: item.key,
+        done: next,
+      })
+      setChecklist(data.prepChecklist || [])
+    } catch {
+      setChecklist((prev) => prev.map((c) => (c.key === item.key ? { ...c, done: item.done } : c)))
+      toast.error('Could not save that step')
+    }
+  }
+
+  /** Request additional blood units; persisted on the hospital record. */
+  const requestBlood = async (component, delta, label) => {
+    if (!hospitalData?._id) return
+    try {
+      const { data } = await api.patch(`/hospitals/${hospitalData._id}/blood`, { component, delta })
+      setBloodBank(data.bloodBank)
+      toast.success(`${delta} units of ${label} added to stock`)
+    } catch {
+      toast.error('Could not update blood stock')
+    }
+  }
+
+  /** Change a bay's state; persisted and broadcast to the command centre. */
+  const setBayStatus = async (bayNumber, status) => {
+    if (!hospitalData?._id) return
+    try {
+      const { data } = await api.patch(`/hospitals/${hospitalData._id}/bays/${bayNumber}`, { status })
+      setBays(
+        (data.erBays || [])
+          .slice()
+          .sort((a, b) => a.number - b.number)
+          .map((b) => ({
+            id: b.number,
+            name: `Bay ${String(b.number).padStart(2, '0')}`,
+            status: (b.status || 'AVAILABLE').toLowerCase(),
+            complaint: b.label || '',
+            doctor: b.doctor || '',
+            since: b.since || null,
+            incident: b.incident || null,
+          }))
+      )
+    } catch {
+      toast.error('Could not update that bay')
+    }
+  }
 
   // Socket.IO event listeners
   useEffect(() => {
@@ -304,13 +371,6 @@ export default function HospitalPortal() {
   const handleNotifyRadiology = () => {
     toast.success('📡 Radiology & CT Scan Suite cleared for immediate priority intake')
     setChecklist((prev) => prev.map((c) => (c.id === 2 ? { ...c, done: true, time: currentTime } : c)))
-  }
-
-  // Toggle Checklist item
-  const toggleChecklist = (id) => {
-    setChecklist((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, done: !c.done, time: !c.done ? currentTime : 'Pending' } : c))
-    )
   }
 
   // Initialize Mapbox 3D Radar Map
@@ -691,17 +751,23 @@ export default function HospitalPortal() {
                     </div>
                   </div>
 
-                  {/* 20 Bays Grid */}
+                  {/* Resuscitation bay board, sized from this hospital record */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2.5 mt-3">
                     {filteredBays.map((bay) => {
                       const isIncoming = bay.status === 'incoming'
                       const isOccupied = bay.status === 'occupied'
                       const isAvail = bay.status === 'available'
 
+                      // AVAILABLE -> OCCUPIED -> CLEANING -> AVAILABLE
+                      const nextStatus = isAvail ? 'OCCUPIED' : isOccupied ? 'CLEANING' : 'AVAILABLE'
+
                       return (
-                        <div
+                        <button
                           key={bay.id}
-                          className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                          type="button"
+                          onClick={() => setBayStatus(bay.id, nextStatus)}
+                          title={`Mark ${bay.name} as ${nextStatus.toLowerCase()}`}
+                          className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all hover:brightness-125 ${
                             isIncoming
                               ? 'bg-red-950/60 border-red-500 shadow-[0_0_15px_rgba(255,45,74,0.4)] animate-pulse'
                               : isOccupied
@@ -713,8 +779,10 @@ export default function HospitalPortal() {
                         >
                           <div className="flex items-center justify-between text-[10px] font-mono">
                             <span className="font-bold text-white">{bay.name}</span>
-                            {isIncoming && <span className="text-red-400 font-bold">ETA 4m</span>}
-                            {isOccupied && <span className="text-white/40">ESI {bay.esi}</span>}
+                            {isIncoming && <span className="text-red-400 font-bold">INBOUND</span>}
+                            {isOccupied && bay.since && (
+                              <span className="text-white/40">{dwellTime(bay.since)}</span>
+                            )}
                             {isAvail && <span className="text-emerald-400">READY</span>}
                           </div>
 
@@ -729,17 +797,29 @@ export default function HospitalPortal() {
 
                           <div className="text-[9px] font-mono text-white/40 flex justify-between">
                             <span>{bay.status.toUpperCase()}</span>
-                            {bay.time && <span>{bay.time}</span>}
+                            {bay.since && <span>{dwellTime(bay.since)}</span>}
                           </div>
-                        </div>
+                        </button>
                       )
                     })}
                   </div>
                 </div>
 
                 <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11px] font-mono text-white/50">
-                  <span>Occupancy: <strong className="text-white">65%</strong></span>
-                  <span>Average Turnaround: <strong className="text-emerald-400">22 min</strong></span>
+                  <span>
+                    Occupancy:{' '}
+                    <strong className="text-white">
+                      {bays.length
+                        ? Math.round((bays.filter((b) => b.status === 'occupied').length / bays.length) * 100) + '%'
+                        : '-'}
+                    </strong>
+                  </span>
+                  <span>
+                    Bays free:{' '}
+                    <strong className="text-emerald-400">
+                      {bays.filter((b) => b.status === 'available').length} of {bays.length || '-'}
+                    </strong>
+                  </span>
                 </div>
               </div>
             </div>
@@ -820,14 +900,24 @@ export default function HospitalPortal() {
                 <div>
                   <div className="font-bold text-sm text-white mb-2 flex items-center justify-between">
                     <span>Pre-Arrival Readiness Protocol</span>
-                    <span className="text-xs font-mono text-emerald-400 font-semibold">Bay 01 Standby</span>
+                    <span className="text-xs font-mono text-emerald-400 font-semibold">
+                      {checklist.length
+                        ? checklist.filter((c) => c.done).length + '/' + checklist.length + ' done'
+                        : 'No inbound patient'}
+                    </span>
                   </div>
 
                   <div className="space-y-1.5">
+                    {checklist.length === 0 && (
+                      <p className="text-xs font-mono text-white/35 py-2">
+                        Steps appear here once a patient is allocated to this hospital. They are
+                        generated from that patient&apos;s own triage.
+                      </p>
+                    )}
                     {checklist.map((item) => (
                       <div
-                        key={item.id}
-                        onClick={() => toggleChecklist(item.id)}
+                        key={item.key}
+                        onClick={() => toggleChecklistItem(item)}
                         className={`p-2 rounded-lg border text-xs font-mono flex items-center justify-between cursor-pointer transition-all ${
                           item.done
                             ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
@@ -838,7 +928,15 @@ export default function HospitalPortal() {
                           <span>{item.done ? '☑' : '☐'}</span>
                           <span>{item.label}</span>
                         </div>
-                        <span className="text-[10px] text-white/40">{item.time}</span>
+                        <span className="text-[10px] text-white/40">
+                          {item.doneAt
+                            ? new Date(item.doneAt).toLocaleTimeString('en-IN', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: false,
+                              })
+                            : ''}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -877,13 +975,16 @@ export default function HospitalPortal() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-red-500/40 shadow-xl">
                 <div className="text-xs font-mono text-red-400 font-bold uppercase">Blood Bank · O-Negative (Universal)</div>
-                <div className="text-3xl font-extrabold text-white font-mono mt-1">{bloodBank.oNeg} Units</div>
-                <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Adequate for 4 Major Polytraumas</div>
+                <div className="text-3xl font-extrabold text-white font-mono mt-1">
+                  {bloodBank?.oNeg ?? '-'} Units
+                </div>
+                <div className="text-[10px] text-emerald-400 font-mono mt-0.5">
+                  {bloodBank?.oNeg != null
+                    ? 'Covers about ' + Math.floor(bloodBank.oNeg / 4) + ' major polytrauma cases'
+                    : 'Stock not reported'}
+                </div>
                 <button
-                  onClick={() => {
-                    setBloodBank((b) => ({ ...b, oNeg: b.oNeg + 4 }))
-                    toast.success('Requested 4 Units O-Neg from Regional Blood Center')
-                  }}
+                  onClick={() => requestBlood('oNeg', 4, 'O-negative')}
                   className="mt-3 w-full py-1.5 rounded-lg bg-red-600/30 hover:bg-red-600/50 border border-red-500/40 text-red-300 text-xs font-mono"
                 >
                   Order +4 Units
@@ -892,13 +993,16 @@ export default function HospitalPortal() {
 
               <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/10 shadow-xl">
                 <div className="text-xs font-mono text-white/50 uppercase">Blood Bank · Fresh Frozen Plasma</div>
-                <div className="text-3xl font-extrabold text-white font-mono mt-1">{bloodBank.plasma} Units</div>
-                <div className="text-[10px] text-white/40 font-mono mt-0.5">Massive Transfusion Protocol ready</div>
+                <div className="text-3xl font-extrabold text-white font-mono mt-1">
+                  {bloodBank?.plasma ?? '-'} Units
+                </div>
+                <div className="text-[10px] text-white/40 font-mono mt-0.5">
+                  {(bloodBank?.plasma ?? 0) >= 10
+                    ? 'Massive transfusion protocol ready'
+                    : 'Below massive transfusion reserve'}
+                </div>
                 <button
-                  onClick={() => {
-                    setBloodBank((b) => ({ ...b, plasma: b.plasma + 6 }))
-                    toast.success('Thawed 6 Units FFP for trauma surgical reserve')
-                  }}
+                  onClick={() => requestBlood('plasma', 6, 'fresh frozen plasma')}
                   className="mt-3 w-full py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-mono"
                 >
                   Thaw +6 Units
@@ -908,9 +1012,16 @@ export default function HospitalPortal() {
               <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/10 shadow-xl">
                 <div className="text-xs font-mono text-cyan-400 uppercase">Mechanical Ventilators</div>
                 <div className="text-3xl font-extrabold text-white font-mono mt-1">
-                  {ventilatorCount} <span className="text-xs text-white/40 font-normal">/ 16 Active</span>
+                  {ventilators?.available ?? '-'}{' '}
+                  <span className="text-xs text-white/40 font-normal">
+                    / {ventilators?.total ?? '-'} available
+                  </span>
                 </div>
-                <div className="text-[10px] text-cyan-300 font-mono mt-0.5">2 Available in Resuscitation Bay</div>
+                <div className="text-[10px] text-cyan-300 font-mono mt-0.5">
+                  {ventilators
+                    ? (ventilators.total || 0) - (ventilators.available || 0) + ' currently in use'
+                    : 'Inventory not reported'}
+                </div>
                 <button
                   onClick={() => {
                     setVentilatorCount((v) => Math.max(0, v - 1))
@@ -1005,7 +1116,8 @@ export default function HospitalPortal() {
                   <div>
                     <div className="font-bold text-white text-sm">{sister.name}</div>
                     <div className="text-xs font-mono text-white/50 mt-1">
-                      ICU: {sister.icu} · Trauma Bays: {sister.trauma} · ETA: {sister.eta}
+                      ICU: {sister.icu} · Trauma Bays: {sister.trauma}
+                      {sister.wait != null ? ' · ER wait: ' + sister.wait + 'm' : ''}
                     </div>
                   </div>
 

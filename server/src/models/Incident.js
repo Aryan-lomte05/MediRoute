@@ -126,6 +126,45 @@ const incidentSchema = new mongoose.Schema(
     },
     voiceTranscript: String,
     notes: String,
+
+    /**
+     * Pre-arrival preparation steps worked by the receiving hospital, and the
+     * field interventions worked by the crew.
+     *
+     * Both boards were previously hardcoded arrays in their respective
+     * portals, so ticking an item persisted nowhere, reset on reload, and was
+     * invisible to the other side of the handover. The field list is seeded
+     * from the triage engine's recommendedActions for this specific patient,
+     * so it reflects the actual presentation rather than a fixed protocol.
+     */
+    prepChecklist: [
+      {
+        key: String,
+        label: String,
+        done: { type: Boolean, default: false },
+        doneAt: Date,
+        doneBy: String,
+      },
+    ],
+    fieldChecklist: [
+      {
+        key: String,
+        label: String,
+        done: { type: Boolean, default: false },
+        doneAt: Date,
+        doneBy: String,
+      },
+    ],
+
+    /** Timestamped crew observations, including dictated notes. */
+    fieldNotes: [
+      {
+        text: String,
+        at: { type: Date, default: Date.now },
+        by: String,
+        source: { type: String, enum: ['TYPED', 'VOICE'], default: 'TYPED' },
+      },
+    ],
   },
   { timestamps: true }
 )
