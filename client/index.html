@@ -14,7 +14,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet" />
+    <!--
+      Mapbox GL's stylesheet is imported by the pages that render a map, so it
+      ships in the map chunk and loads only on those routes. A CDN <link> here
+      was a render-blocking request on every route, including the public
+      emergency page, which draws no map at all.
+    -->
   </head>
   <body class="bg-[#0a0a0f]">
     <div id="root"></div>

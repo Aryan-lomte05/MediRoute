@@ -37,6 +37,8 @@ import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { PREFETCHED_TRAFFIC_ROUTES } from '../lib/routing'
+import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import AiStatusBadge from '../components/AiStatusBadge'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
@@ -90,6 +92,27 @@ function VitalTile({ label, value, unit, tone }) {
     </div>
   )
 }
+
+
+/** Walkthrough for the emergency department console. */
+const HOSPITAL_TOUR_STEPS = [
+  {
+    heading: 'Who is on the way to you',
+    body: 'The queue shows patients an ambulance is bringing in, with how urgent they are and what the crew has found so far. It updates as the crew works, not only at handover.',
+  },
+  {
+    heading: 'The pre-arrival checklist is per patient',
+    body: 'It is generated from that specific patient\u2019s assessment, so a cardiac case and a head injury get different steps. Ticking an item is saved and the ambulance crew sees it.',
+  },
+  {
+    heading: 'Bays, blood and ventilators are live',
+    body: 'Tap a bay to move it between available, occupied and cleaning. Blood stock changes are saved to this hospital\u2019s record, so the city command centre sees them immediately.',
+  },
+  {
+    heading: 'Missing data is shown as missing',
+    body: 'Where a vital sign reads \u201cNot recorded\u201d, the crew has genuinely not sent one yet. The screen will never fill in a plausible number for a reading nobody measured.',
+  },
+]
 
 export default function HospitalPortal() {
   const { user, logout } = useAuthStore()
@@ -557,6 +580,14 @@ export default function HospitalPortal() {
               </span>
             </div>
           </div>
+
+          <AiStatusBadge className="hidden lg:inline-flex" />
+          <ModeToggle portal="hospital" className="hidden md:inline-flex" />
+          <GuideButton
+            tourId="hospital-v1"
+            title="Emergency Department"
+            steps={HOSPITAL_TOUR_STEPS}
+          />
 
           <button
             onClick={logout}

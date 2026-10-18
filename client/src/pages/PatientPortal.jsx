@@ -32,6 +32,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '../store/authStore'
 import { getSocket } from '../lib/socket'
 import api from '../lib/api'
+import { ModeToggle, GuideButton } from '../components/PortalGuide'
 import { CITIZEN_REAL_ROUTE } from '../lib/routing'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -280,6 +281,27 @@ function TrackingMap({ ambulanceUnit = 'MH-AMB-002', hospitalName = 'Lilavati Ho
     </div>
   )
 }
+
+
+/** Walkthrough for the signed-in citizen portal. */
+const PATIENT_TOUR_STEPS = [
+  {
+    heading: 'You do not need to be signed in to get help',
+    body: 'The emergency page works with no account at all, and anyone can use it for themselves or for a stranger. This portal adds the things that need an account: your saved medical details and your past reports.',
+  },
+  {
+    heading: 'Fill in your medical profile once',
+    body: 'Your blood group, allergies and conditions are sent to the crew automatically when you report an emergency, so nobody has to ask while you are unwell.',
+  },
+  {
+    heading: 'Tracking updates on its own',
+    body: 'Once a crew is assigned you will see which vehicle is coming and roughly how far away it is. Leave the page open; if you close it, your phone brings you back.',
+  },
+  {
+    heading: 'First aid guides are for before help arrives',
+    body: 'They cover the common emergencies in short steps. Only do what feels safe, and never move an injured person unless they are in danger where they are.',
+  },
+]
 
 export default function PatientPortal() {
   const { user } = useAuthStore()
@@ -552,6 +574,18 @@ export default function PatientPortal() {
                 {isDispatched ? 'Live Tracking Active' : 'Help Arrives Faster'}
               </div>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <a
+              href="/sos"
+              className="hidden sm:inline-flex items-center rounded-full border border-red-500/40 bg-red-600/15 px-3 py-1.5 text-[11px] font-bold text-red-300 hover:bg-red-600/30 transition-colors"
+              title="The emergency page works without signing in, for you or for someone else"
+            >
+              Emergency page
+            </a>
+            <ModeToggle portal="patient" className="hidden md:inline-flex" />
+            <GuideButton tourId="patient-v1" title="Your MediRoute account" steps={PATIENT_TOUR_STEPS} />
           </div>
 
           {isDispatched ? (

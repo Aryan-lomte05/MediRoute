@@ -39,10 +39,37 @@ import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContai
 import { getSocket } from '../lib/socket'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
+import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import AiStatusBadge from '../components/AiStatusBadge'
 import toast from 'react-hot-toast'
 import { ADMIN_REAL_ROUTE } from '../lib/routing'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
+
+
+/** Walkthrough for the city command centre. */
+const ADMIN_TOUR_STEPS = [
+  {
+    heading: 'This is the whole city at once',
+    body: 'Every live emergency, every ambulance and every hospital is on one map. Nothing here is a simulation: it is read from the same database the crews and hospitals write to.',
+  },
+  {
+    heading: 'The five views along the top',
+    body: 'Map shows live positions. Fleet lists every vehicle and its state. Hospitals shows beds and who is diverting. Analytics forecasts demand. Audit is the searchable record of every past case.',
+  },
+  {
+    heading: 'Severity is shown as ESI 1 to 5',
+    body: 'ESI 1 means an immediate threat to life; ESI 5 can safely wait. The coloured counts tell you how many active cases sit at each level right now.',
+  },
+  {
+    heading: 'The forecast is built from your own history',
+    body: 'It buckets past incidents by hour of day, so its confidence depends on how much history exists. A low confidence figure means there is not enough data yet, not that the city is quiet.',
+  },
+  {
+    heading: 'Switch to Simple if this is too much',
+    body: 'The Simple view keeps the map and the live counts and hides the deeper operational panels. Your choice is remembered on this device. The ? button reopens this walkthrough.',
+  },
+]
 
 export default function AdminPortal() {
   const { user, logout } = useAuthStore()
@@ -808,6 +835,13 @@ export default function AdminPortal() {
               <div className="text-xs font-semibold text-white leading-tight">Admin</div>
               <div className="text-[10px] text-white/40 leading-tight">City Dispatcher</div>
             </div>
+            <AiStatusBadge className="hidden lg:inline-flex" />
+            <ModeToggle portal="admin" className="hidden md:inline-flex" />
+            <GuideButton
+              tourId="admin-v1"
+              title="City Command Centre"
+              steps={ADMIN_TOUR_STEPS}
+            />
             <button onClick={logout} title="Logout" className="ml-1 text-white/30 hover:text-red-400 text-xs transition-colors p-1">
               ⏻
             </button>

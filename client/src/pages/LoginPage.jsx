@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
+import { addLayerBelowLabels } from '../lib/mapLayers'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 
@@ -210,8 +211,7 @@ export default function LoginPage() {
           type: 'vector',
           url: 'mapbox://mapbox.mapbox-traffic-v1',
         })
-        map.addLayer(
-          {
+        addLayerBelowLabels(map, {
             id: 'traffic-lines',
             type: 'line',
             source: 'mapbox-traffic',
@@ -230,9 +230,7 @@ export default function LoginPage() {
               'line-width': 2.2,
               'line-opacity': 0.45,
             },
-          },
-          'road-label'
-        )
+          })
       }
 
       // Add green corridor route GeoJSON

@@ -30,15 +30,24 @@ const allowedOrigins = [
   'http://localhost:5174',
 ].filter(Boolean)
 
+const isProduction = process.env.NODE_ENV === 'production'
+
 app.use(cors({
   origin: (origin, callback) => {
     // Vercel gives every preview deployment its own subdomain, so those are
     // matched by suffix rather than listed. Requests with no Origin header
     // (curl, server-to-server, health probes) are allowed through.
+    //
+    // Outside production any loopback port is accepted, so `vite dev` (5173),
+    // `vite preview` (4173) and ad-hoc ports all work without editing this
+    // list. In production only the explicit origins above are permitted.
+    const isLoopback = origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
+
     const allowed =
       !origin ||
       allowedOrigins.includes(origin) ||
-      /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)
+      /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin) ||
+      (!isProduction && isLoopback)
 
     // Both branches previously returned callback(null, true), which allowed
     // every origin on the internet and made the allowlist decorative.

@@ -38,8 +38,31 @@ import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { PARAMEDIC_REAL_ROUTE } from '../lib/routing'
+import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import AiStatusBadge from '../components/AiStatusBadge'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
+
+
+/** Walkthrough for the field console. */
+const PARAMEDIC_TOUR_STEPS = [
+  {
+    heading: 'Navigation runs off this device',
+    body: 'Speed, distance and ETA come from this phone\u2019s GPS, and your position is sent to the control room and to the patient who called. If it reads \u201cno GPS\u201d, location permission is off.',
+  },
+  {
+    heading: 'Your checklist is for this patient',
+    body: 'The interventions listed were generated from this patient\u2019s own assessment, not a fixed protocol. Ticking one is saved and appears on the receiving hospital\u2019s screen.',
+  },
+  {
+    heading: 'Dictation is real transcription',
+    body: 'Tap the microphone, speak, then tap again to stop. The recording is transcribed and attached to the patient record, and the emergency department sees it straight away.',
+  },
+  {
+    heading: 'Recording vitals can change the triage',
+    body: 'When you send measured vitals, the case is reassessed. If the numbers are worse than the phone description suggested, the severity is raised and the hospital is told.',
+  },
+]
 
 export default function ParamedicPortal() {
   const { user, logout } = useAuthStore()
@@ -613,12 +636,20 @@ export default function ParamedicPortal() {
           <div className="flex items-center gap-2 px-3 py-1 rounded-lg border border-cyan-500/30 bg-cyan-950/20 text-cyan-300 font-semibold text-xs">
             <span className="text-sm">🚑</span>
             <div>
-              <div>{activeAmbulance?.vehicleNumber || 'MH-AMB-002'}</div>
+              <div>{activeAmbulance?.vehicleNumber || 'No unit assigned'}</div>
               <div className="text-[8px] text-cyan-400/60 leading-none hidden sm:block">
-                {activeAmbulance?.vehicleType?.replace(/_/g, ' ') || 'ADVANCED LIFE SUPPORT'}
+                {activeAmbulance?.vehicleType?.replace(/_/g, ' ') || '—'}
               </div>
             </div>
           </div>
+
+          <AiStatusBadge className="hidden lg:inline-flex" />
+          <ModeToggle portal="paramedic" className="hidden md:inline-flex" />
+          <GuideButton
+            tourId="paramedic-v1"
+            title="Field Console"
+            steps={PARAMEDIC_TOUR_STEPS}
+          />
 
           <button
             onClick={logout}

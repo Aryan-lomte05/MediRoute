@@ -24,11 +24,16 @@ import { useNavigate } from 'react-router-dom'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
+import ProductTour from '../components/ProductTour'
+import { addLayerBelowLabels } from '../lib/mapLayers'
+
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
 export default function Landing() {
   const navigate = useNavigate()
-  const [videoModalOpen, setVideoModalOpen] = useState(false)
+  // Opens the interactive walkthrough. This replaced a placeholder modal that
+  // showed a play icon and nothing else.
+  const [tourOpen, setTourOpen] = useState(false)
   const [legalModal, setLegalModal] = useState(null)
   const heroMapRef = useRef(null)
 
@@ -53,8 +58,7 @@ export default function Landing() {
           type: 'vector',
           url: 'mapbox://mapbox.mapbox-traffic-v1',
         })
-        map.addLayer(
-          {
+        addLayerBelowLabels(map, {
             id: 'traffic-lines',
             type: 'line',
             source: 'mapbox-traffic',
@@ -73,9 +77,7 @@ export default function Landing() {
               'line-width': 2.5,
               'line-opacity': 0.6,
             },
-          },
-          'road-label'
-        )
+          })
       }
 
       // Live green corridor road line
@@ -394,14 +396,14 @@ export default function Landing() {
             <div className="flex flex-col sm:flex-row gap-4 pt-4">
               {/* Emergency SOS Button */}
               <button
-                onClick={() => navigate('/login')}
+                onClick={() => navigate('/sos')}
                 className="group relative px-6 py-3.5 rounded-xl bg-gradient-to-r from-[#b31427] to-[#e61732] hover:from-[#e61732] hover:to-[#b31427] text-white shadow-[0_0_30px_rgba(255,45,74,0.4)] border border-red-400/40 transition-all flex items-center justify-between min-w-[220px]"
               >
                 <div className="flex items-center gap-3 text-left">
                   <span className="text-2xl">🚑</span>
                   <div>
                     <div className="text-sm font-bold tracking-wide">Emergency SOS</div>
-                    <div className="text-[10px] text-white/70 font-mono">Get help now</div>
+                    <div className="text-[10px] text-white/70 font-mono">No login needed</div>
                   </div>
                 </div>
                 <span className="text-lg font-bold ml-4 group-hover:translate-x-1 transition-transform">→</span>
@@ -409,20 +411,49 @@ export default function Landing() {
 
               {/* Explore Platform Button */}
               <button
-                onClick={() => {
-                  const el = document.getElementById('platform')
-                  el?.scrollIntoView({ behavior: 'smooth' })
-                }}
+                onClick={() => setTourOpen(true)}
                 className="px-6 py-3.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/10 text-white transition-all flex items-center gap-3 text-left min-w-[200px]"
               >
                 <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-[10px]">
                   ▶
                 </div>
                 <div>
-                  <div className="text-sm font-bold">Explore the Platform</div>
-                  <div className="text-[10px] text-white/50 font-mono">See how it works</div>
+                  <div className="text-sm font-bold">Watch how it works</div>
+                  <div className="text-[10px] text-white/50 font-mono">9 chapters · step by step</div>
                 </div>
               </button>
+            </div>
+
+            {/*
+              Review feedback was that civilians could not tell what to do on
+              this page. This states the three steps in plain words, directly
+              under the buttons, before any product language.
+            */}
+            <div className="pt-6 border-t border-white/[0.08] mt-2">
+              <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-white/35 mb-3">
+                If you need help right now
+              </p>
+              <ol className="space-y-2">
+                {[
+                  'Tap Emergency SOS. No account, no password.',
+                  'Say whether it is you or someone else, and what is wrong.',
+                  'An ambulance is sent and you can follow it on this phone.',
+                ].map((step, i) => (
+                  <li key={step} className="flex gap-3 text-sm text-white/70 leading-relaxed">
+                    <span className="h-5 w-5 rounded-full bg-white/10 text-white/80 grid place-items-center text-[10px] font-bold shrink-0 mt-0.5">
+                      {i + 1}
+                    </span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+              <p className="text-[11px] text-white/35 mt-3 leading-relaxed">
+                In a life-threatening emergency you can always call{' '}
+                <a href="tel:108" className="text-white/60 underline hover:text-white">
+                  108
+                </a>{' '}
+                directly. This does not replace that.
+              </p>
             </div>
           </div>
         </div>
@@ -533,7 +564,7 @@ export default function Landing() {
           </div>
 
           <button
-            onClick={() => setVideoModalOpen(true)}
+            onClick={() => setTourOpen(true)}
             className="flex items-center gap-3 px-5 py-2.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white text-xs font-mono transition-all whitespace-nowrap"
           >
             <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[9px]">▶</span>
@@ -1015,28 +1046,8 @@ curl -X POST https://mediroute.app/api/incidents \\
 
       {/* Video Modal (Mock presentation) */}
       <AnimatePresence>
-        {videoModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
-            onClick={() => setVideoModalOpen(false)}
-          >
-            <div className="relative w-full max-w-3xl rounded-2xl overflow-hidden border border-white/20 bg-[#0a0a14] p-6 text-center" onClick={(e) => e.stopPropagation()}>
-              <div className="flex justify-between items-center mb-4">
-                <span className="font-bold text-white font-display">MediRoute Platform Overview</span>
-                <button onClick={() => setVideoModalOpen(false)} className="text-white/50 hover:text-white text-lg">✕</button>
-              </div>
-              <div className="aspect-video w-full rounded-xl bg-black border border-white/10 flex flex-col items-center justify-center p-6">
-                <div className="w-16 h-16 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center mb-3">
-                  <span className="text-2xl text-red-400">▶</span>
-                </div>
-                <div className="text-white font-semibold">MediRoute — Real-Time Emergency Coordination Engine</div>
-                <p className="text-white/50 text-xs mt-1 max-w-md">Demonstrating automated dispatch, AI triage scoring (ESI 1–5), green corridor signals, and zero-wait ER handover.</p>
-              </div>
-            </div>
-          </motion.div>
+        {tourOpen && (
+          <ProductTour onClose={() => setTourOpen(false)} onStartSos={() => navigate('/sos')} />
         )}
       </AnimatePresence>
     </div>
