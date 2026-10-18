@@ -1,3 +1,34 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - PARAMEDIC EMERGENCY DISPATCH HUD & NAVIGATION COCKPIT (ParamedicPortal.jsx)
+ * ==============================================================================
+ * 
+ * WHAT IS WHERE:
+ * - Line 25-35:    Module Imports & Mapbox GL Token Initialization
+ * - Line 36-95:    Component State & Hardware HUD Telemetry:
+ *                  - Cockpit tabs (`nav` | `vitals` | `protocols` | `voice`)
+ *                  - Dynamic speedometer, distance counter, ETA clock
+ *                  - Patient vitals state (HR, BP, SpO2, Glasgow Coma Scale)
+ *                  - Pre-hospital stabilization checklist items
+ * - Line 96-180:   Socket.IO Real-time Synchronization:
+ *                  - GPS telemetry broadcast to City Admin command room
+ *                  - Hospital trauma bay pre-arrival data link
+ * - Line 181-340:  Turn-by-Turn Mapbox 3D Geonav Engine:
+ *                  - Real-time ambulance vector along Mumbai Bandra-Parel corridor
+ *                  - Traffic pre-emption layer (automated green wave traffic light clearing)
+ * - Line 341-440:  Paramedic Actions:
+ *                  - `handleDispatchStatusChange`: Updates emergency workflow state
+ *                  - `handleVitalsUpdate`: Streams real-time vitals to ER doctors
+ *                  - `toggleChecklist`: Digital triage checklist compliance
+ *                  - `recordVoiceNote`: Speech-to-text paramedic clinical notes
+ * - Line 441-End:  Cockpit Layout & Sub-Navigation Views:
+ *                  - View 1: 🧭 3D Geonav HUD with floating turn-by-turn instruction card
+ *                  - View 2: 💓 Real-time Vitals Monitor with physiological alert thresholds
+ *                  - View 3: 📋 Clinical Protocols & ACLS Trauma Care checklist
+ *                  - View 4: 🎙️ AI Voice Dictation & ER Doctor Handover Summary
+ * ==============================================================================
+ */
+
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import mapboxgl from 'mapbox-gl'
@@ -60,7 +91,11 @@ export default function ParamedicPortal() {
     const updateTime = () => {
       const now = new Date()
       setCurrentTime(now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }))
-      setCurrentDate('Thu, 19 Sep 2026')
+      // Was hardcoded to 'Thu, 19 Sep 2026', so the field HUD showed the same
+      // date on every shift.
+      setCurrentDate(
+        now.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+      )
     }
     updateTime()
     const timer = setInterval(updateTime, 1000)

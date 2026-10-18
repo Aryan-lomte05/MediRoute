@@ -1,3 +1,36 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - SMART CITY EMERGENCY OPERATIONS COMMAND CENTER (AdminPortal.jsx)
+ * ==============================================================================
+ * 
+ * WHAT IS WHERE:
+ * - Line 25-35:    Module Imports, Mapbox GL & Recharts Analytics
+ * - Line 36-95:    Global Command State:
+ *                  - Active views (`map` | `fleet` | `hospitals` | `analytics` | `incidents`)
+ *                  - Camera angle presets (`iso` | `fpv` | `2d` | `orbit`)
+ *                  - Live telemetry stats (Active emergencies, ICU bed usage, average response latency)
+ *                  - Database entity collections (`ambulances`, `hospitals`, `incidents`, `surgeForecast`)
+ * - Line 96-220:   Socket.IO Event Stream & Initial Cloud Database Hydration:
+ *                  - Real-time incident triggers and paramedic GPS position updates
+ *                  - Dynamic hospital bed reservation telemetry
+ * - Line 221-420:  Mapbox 3D Tactical GIS Engine:
+ *                  - 3D building extrusion layer
+ *                  - Animated Mumbai Sea Link green corridor route vectors
+ *                  - Interactive HTML/SVG vehicle markers with heading orientation
+ *                  - Hospital trauma nodes with live ICU capacity rings
+ * - Line 421-580:  Dispatcher Command Handlers:
+ *                  - `handleAssignAmbulance`: Automated/Manual nearest unit dispatch
+ *                  - `handleCameraChange`: Smooth flyTo transitions across Mumbai emergency clusters
+ *                  - `handleExportTelemetry`: Audit report generator
+ * - Line 581-End:  5 Dedicated Management Sub-Portals:
+ *                  - View 1: 🗺️ 3D Tactical GIS Command Map & Live Incident Queue
+ *                  - View 2: 🚑 Advanced Ambulance Fleet Telemetry & Maintenance Manager
+ *                  - View 3: 🏥 City Hospital Bed Matrix, ICU Ward Status & Diversion Controls
+ *                  - View 4: 📊 AI Predictive Surge Analytics & Call Volume Forecasting (Recharts)
+ *                  - View 5: 📑 Emergency Incident Audit Log, Filters & Detailed Timelines
+ * ==============================================================================
+ */
+
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import mapboxgl from 'mapbox-gl'
@@ -34,19 +67,15 @@ export default function AdminPortal() {
   const [incidentStatusFilter, setIncidentStatusFilter] = useState('ALL')
 
   // Backend Data State
-  const [stats, setStats] = useState({
-    total: 18,
-    active: 4,
-    completed: 14,
-    avgDelaySeconds: 42,
-    esiCounts: { esi1: 2, esi2: 1, esi3: 1, esi4: 0 },
-    fleet: { total: 4, available: 3, inRoute: 1 },
-    beds: { total: 105, occupied: 82, utilizationRate: 78 },
-  })
+  // Null until the first successful fetch. Every readout below renders an em
+  // dash while this is null rather than standing in a plausible-looking number.
+  const [stats, setStats] = useState(null)
+  const [statsError, setStatsError] = useState(false)
   const [ambulances, setAmbulances] = useState([])
   const [hospitals, setHospitals] = useState([])
   const [incidents, setIncidents] = useState([])
   const [surgeForecast, setSurgeForecast] = useState([])
+  const [forecastBasis, setForecastBasis] = useState(null)
 
   // Map Refs
   const mapRef = useRef(null)
@@ -59,7 +88,8 @@ export default function AdminPortal() {
     const updateClock = () => {
       const now = new Date()
       const timeStr = now.toLocaleTimeString('en-IN', { hour12: false })
-      setCurrentTime(`19 Sep 2026 | ${timeStr} IST`)
+      const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+      setCurrentTime(`${dateStr} | ${timeStr} IST`)
     }
     updateClock()
     const timer = setInterval(updateClock, 1000)
@@ -91,31 +121,34 @@ export default function AdminPortal() {
 
       if (statsRes?.data?.summary) {
         setStats(statsRes.data.summary)
-        if (statsRes.data.summary.surgeForecast?.length) {
-          setSurgeForecast(statsRes.data.summary.surgeForecast)
-        }
+        setStatsError(false)
+      } else {
+        setStatsError(true)
       }
 
-      if (ambRes?.data?.ambulances?.length) {
-        setAmbulances(ambRes.data.ambulances)
-      }
-      if (hospRes?.data?.hospitals?.length) {
-        setHospitals(hospRes.data.hospitals)
-      }
-      if (incRes?.data?.incidents?.length) {
-        setIncidents(incRes.data.incidents)
-      }
-      if (forecastRes?.data?.forecast?.length && !surgeForecast.length) {
+      if (ambRes?.data?.ambulances) setAmbulances(ambRes.data.ambulances)
+      if (hospRes?.data?.hospitals) setHospitals(hospRes.data.hospitals)
+      if (incRes?.data?.incidents) setIncidents(incRes.data.incidents)
+
+      // The forecast endpoint already returns an 'HH:00' label and a 0-100
+      // confidence. The previous mapping multiplied that by 100 again, so the
+      // chart was labelled with confidences like 3500%.
+      const forecast = forecastRes?.data?.forecast || statsRes?.data?.summary?.surgeForecast
+      if (forecast?.length) {
         setSurgeForecast(
-          forecastRes.data.forecast.slice(0, 12).map((f) => ({
-            hour: `${String(f.hour).padStart(2, '0')}:00`,
+          forecast.slice(0, 12).map((f) => ({
+            hour: f.hour,
             load: Math.round(f.predictedLoad),
-            confidence: Math.round((f.confidence || 0.9) * 100),
+            confidence: Math.round(f.confidence),
+            samples: f.samples ?? null,
           }))
         )
       }
+
+      setForecastBasis(forecastRes?.data?.basis || statsRes?.data?.summary?.surgeBasis || null)
     } catch (err) {
       console.warn('Admin fetch error:', err)
+      setStatsError(true)
     }
   }
 
@@ -392,7 +425,9 @@ export default function AdminPortal() {
   const displayFeed =
     incidents.length > 0
       ? incidents.map((inc) => {
-          const esi = inc.triageData?.esiLevel || 2
+          // Untriaged incidents are grouped separately rather than being counted
+          // as ESI-2, which silently inflated the emergent bucket.
+          const esi = inc.triageData?.esiLevel ?? null
           const colorMap = { 1: '#FF2D4A', 2: '#FF8C00', 3: '#3B82F6', 4: '#10B981', 5: '#6B7280' }
           const createdDate = new Date(inc.createdAt || Date.now())
           const timeStr = createdDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -503,7 +538,9 @@ export default function AdminPortal() {
 
     activeUnits.forEach((a) => {
       const coords = a.currentLocation?.coordinates || [72.852, 19.035]
-      const spd = a.currentLocation?.speed || 75
+      // Telemetry speed, or nothing. A default of 75 km/h made parked units
+      // look like they were moving.
+      const spd = a.currentLocation?.speed ?? null
       createMarker(
         coords,
         `
@@ -759,7 +796,7 @@ export default function AdminPortal() {
           >
             <span className="text-sm">🔔</span>
             <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#FF2D4A] text-[9px] font-bold font-mono flex items-center justify-center text-white">
-              {stats?.esiCounts?.esi1 || 2}
+              {stats?.esiCounts?.esi1 ?? '—'}
             </span>
           </button>
 
@@ -802,7 +839,7 @@ export default function AdminPortal() {
             }`}
           >
             <span>🚑</span>
-            <span>Fleet Operations ({ambulances.length || 4})</span>
+            <span>Fleet Operations ({ambulances.length})</span>
           </button>
 
           <button
@@ -814,7 +851,7 @@ export default function AdminPortal() {
             }`}
           >
             <span>🏥</span>
-            <span>Trauma & Bed Matrix ({hospitals.length || 4})</span>
+            <span>Trauma & Bed Matrix ({hospitals.length})</span>
           </button>
 
           <button
@@ -1421,7 +1458,7 @@ export default function AdminPortal() {
                           <div className="p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]">
                             <div className="text-[10px] text-white/40">Speed / Battery</div>
                             <div className="text-emerald-400 font-semibold mt-0.5">
-                              {amb.currentLocation?.speed || 78} km/h · 94%
+                              {amb.currentLocation?.speed != null ? `${amb.currentLocation.speed} km/h` : 'speed n/a'}
                             </div>
                           </div>
                         </div>
@@ -1833,7 +1870,7 @@ export default function AdminPortal() {
               <div className="text-[10px] font-mono text-white/40 uppercase tracking-wider">Fleet Status</div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-extrabold text-white tracking-tight">
-                  {stats?.fleet?.total || ambulances.length || 4}
+                  {stats?.fleet?.total ?? ambulances.length}
                 </span>
                 <span className="text-[10px] font-mono text-white/50">Total Active Units</span>
               </div>
@@ -1859,16 +1896,16 @@ export default function AdminPortal() {
               <div className="text-[10px] font-mono text-white/40 uppercase tracking-wider">Hospital Bed Utilization</div>
               <div className="flex items-baseline justify-between">
                 <span className="text-2xl font-extrabold text-white tracking-tight">
-                  {stats?.beds?.utilizationRate || 78}%
+                  {stats?.beds?.utilizationRate ?? '—'}%
                 </span>
                 <span className="text-[10px] font-mono text-white/50">
-                  {stats?.beds?.occupied || 82} / {stats?.beds?.total || 105} ER Beds
+                  {stats?.beds?.occupied ?? '—'} / {stats?.beds?.total ?? '—'} ER Beds
                 </span>
               </div>
               <div className="mt-1 h-2 w-full bg-white/10 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-cyan-500 via-purple-500 to-[#FF2D4A] rounded-full transition-all duration-500"
-                  style={{ width: `${stats?.beds?.utilizationRate || 78}%` }}
+                  style={{ width: `${stats?.beds?.utilizationRate ?? 0}%` }}
                 />
               </div>
             </div>
@@ -1884,7 +1921,7 @@ export default function AdminPortal() {
               <div className="flex items-baseline justify-between">
                 <div className="flex items-baseline gap-2">
                   <span className="text-2xl font-extrabold text-white tracking-tight">
-                    {stats?.avgDelaySeconds || 42}s
+                    {stats?.avgDispatchSeconds != null ? `${stats.avgDispatchSeconds}s` : '—'}
                   </span>
                   <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
                     <span>↓ 32%</span>

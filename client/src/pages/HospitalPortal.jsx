@@ -1,3 +1,33 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - HOSPITAL EMERGENCY ROOM & TRAUMA RESUSCITATION PORTAL (HospitalPortal.jsx)
+ * ==============================================================================
+ * 
+ * WHAT IS WHERE:
+ * - Line 25-35:    Module Imports & Mapbox GL Token Initialization
+ * - Line 36-95:    Component State & Trauma Unit Telemetry:
+ *                  - Navigation tabs (`queue` | `inventory` | `protocols` | `mutualaid`)
+ *                  - ICU / ER / OR Bed matrix and diversion state (`NORMAL` | `DIVERT`)
+ *                  - Blood Bank stocks (O-Neg, A-Pos, Plasma) & Ventilator monitors
+ *                  - Pre-arrival surgical prep checklist & Regional sister hospitals
+ * - Line 96-180:   Real-time Socket.IO Listeners & MongoDB Sync:
+ *                  - Inbound ambulance telemetry & dynamic ETA countdown
+ *                  - Automated bed reservation broadcasts
+ * - Line 181-300:  Tactical 3D Approach Corridor Mapbox Engine:
+ *                  - Hospital location node & live incoming ambulance path
+ *                  - Traffic congestion vectors on approach routes
+ * - Line 301-410:  Hospital ER Handlers:
+ *                  - `toggleDivertStatus`: Signals city dispatchers when capacity is saturated
+ *                  - `reserveBed`: Instant clinical reservation before patient arrives
+ *                  - `notifySurgicalTeam`: Emergency trauma bay team paging
+ * - Line 411-End:  ER Trauma Dashboard Views:
+ *                  - View 1: 🏥 Inbound Critical Ambulance Queue & Patient Vitals
+ *                  - View 2: 🩸 Blood Bank, Blood Components & Life-Support Equipment
+ *                  - View 3: 📋 Zero-Wait Trauma Intake Resuscitation Protocol
+ *                  - View 4: 🤝 City-Wide Mutual Aid Network & Capacity Balancing
+ * ==============================================================================
+ */
+
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import mapboxgl from 'mapbox-gl'
@@ -10,6 +40,45 @@ import { PREFETCHED_TRAFFIC_ROUTES } from '../lib/routing'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
+/** Badge styling per ESI level, matching the global badge-esi-* palette. */
+const ESI_BADGE = {
+  1: 'bg-red-600/40 border-red-500',
+  2: 'bg-orange-600/35 border-orange-500',
+  3: 'bg-amber-500/30 border-amber-400',
+  4: 'bg-emerald-600/30 border-emerald-500',
+  5: 'bg-emerald-600/20 border-emerald-600',
+}
+
+const ESI_WORD = {
+  1: 'CRITICAL',
+  2: 'EMERGENT',
+  3: 'URGENT',
+  4: 'SEMI-URGENT',
+  5: 'NON-URGENT',
+}
+
+/**
+ * One vital sign. Renders "Not recorded" when the value is absent rather than
+ * substituting a plausible number, so staff can tell measured data apart from
+ * missing data at a glance.
+ */
+function VitalTile({ label, value, unit, tone }) {
+  const recorded = value !== null && value !== undefined && value !== ''
+  return (
+    <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
+      <div className="text-white/40 text-[10px]">{label}</div>
+      {recorded ? (
+        <div className={`text-lg font-bold mt-0.5 ${tone}`}>
+          {value}
+          {unit ? ` ${unit}` : ''}
+        </div>
+      ) : (
+        <div className="text-sm font-semibold mt-1 text-white/30">Not recorded</div>
+      )}
+    </div>
+  )
+}
+
 export default function HospitalPortal() {
   const { user, logout } = useAuthStore()
 
@@ -17,7 +86,9 @@ export default function HospitalPortal() {
   const [hospitalTab, setHospitalTab] = useState('queue') // 'queue' | 'inventory' | 'protocols' | 'mutualaid'
 
   // Live Clock
-  const [currentTime, setCurrentTime] = useState('20:28:17')
+  const [currentTime, setCurrentTime] = useState(() =>
+    new Date().toLocaleTimeString('en-IN', { hour12: false })
+  )
   const [currentDate, setCurrentDate] = useState('Thu, 19 Sep 2026')
 
   // Real Hospital Data State
@@ -28,6 +99,7 @@ export default function HospitalPortal() {
   const [intakeStatus, setIntakeStatus] = useState('NORMAL') // 'NORMAL' | 'DIVERT'
   const [bedFilter, setBedFilter] = useState('all') // 'all' | 'occupied' | 'available' | 'cleaning'
   const [inboundIncident, setInboundIncident] = useState(null)
+  const inboundVitals = inboundIncident?.triageData?.vitals || null
 
   // Map & Telemetry States
   const [isMapFullscreen, setIsMapFullscreen] = useState(false)
@@ -682,47 +754,64 @@ export default function HospitalPortal() {
                     <div>
                       <div className="text-xs font-mono text-red-400 font-bold uppercase">Priority Inbound Trauma</div>
                       <div className="text-base font-extrabold text-white leading-tight">
-                        {inboundIncident?.triageData?.chiefComplaint || 'Penetrating Torso Trauma (Gunshot / Stab)'}
+                        {inboundIncident?.triageData?.chiefComplaint || 'Awaiting details from the crew'}
                       </div>
                     </div>
                   </div>
 
-                  <span className="px-3 py-1 rounded-full bg-red-600/40 border border-red-500 text-white font-mono text-xs font-bold">
-                    ESI 1 CRITICAL
+                  <span className={`px-3 py-1 rounded-full border text-white font-mono text-xs font-bold ${ESI_BADGE[inboundIncident?.triageData?.esiLevel] || 'bg-white/10 border-white/20'}`}>
+                    {inboundIncident?.triageData?.esiLevel
+                      ? `ESI ${inboundIncident.triageData.esiLevel} ${ESI_WORD[inboundIncident.triageData.esiLevel]}`
+                      : 'AWAITING TRIAGE'}
                   </span>
                 </div>
 
+                {/*
+                  Vitals render only when a paramedic has actually recorded
+                  them. An absent value shows "Not recorded", never a filled-in
+                  number: a fabricated heart rate on a trauma handover screen is
+                  a clinical hazard, not a cosmetic placeholder.
+                */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
-                    <div className="text-white/40 text-[10px]">Heart Rate</div>
-                    <div className="text-lg font-bold text-red-400 mt-0.5">
-                      {inboundIncident?.triageData?.vitals?.heartRate || 118} BPM
-                    </div>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
-                    <div className="text-white/40 text-[10px]">Blood Pressure</div>
-                    <div className="text-lg font-bold text-yellow-400 mt-0.5">
-                      {inboundIncident?.triageData?.vitals?.bpSystolic || 85}/{inboundIncident?.triageData?.vitals?.bpDiastolic || 55}
-                    </div>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
-                    <div className="text-white/40 text-[10px]">SpO2</div>
-                    <div className="text-lg font-bold text-cyan-300 mt-0.5">
-                      {inboundIncident?.triageData?.vitals?.spO2 || 92}%
-                    </div>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/10">
-                    <div className="text-white/40 text-[10px]">GCS Score</div>
-                    <div className="text-lg font-bold text-purple-300 mt-0.5">
-                      {inboundIncident?.triageData?.vitals?.gcs || 13}
-                    </div>
-                  </div>
+                  <VitalTile
+                    label="Heart Rate"
+                    value={inboundVitals?.heartRate}
+                    unit="BPM"
+                    tone="text-red-400"
+                  />
+                  <VitalTile
+                    label="Blood Pressure"
+                    value={
+                      inboundVitals?.bloodPressureSystolic != null &&
+                      inboundVitals?.bloodPressureDiastolic != null
+                        ? `${inboundVitals.bloodPressureSystolic}/${inboundVitals.bloodPressureDiastolic}`
+                        : null
+                    }
+                    unit="mmHg"
+                    tone="text-yellow-400"
+                  />
+                  <VitalTile
+                    label="SpO2"
+                    value={inboundVitals?.spO2}
+                    unit="%"
+                    tone="text-cyan-300"
+                  />
+                  <VitalTile
+                    label="GCS Score"
+                    value={inboundVitals?.gcsScore}
+                    unit=""
+                    tone="text-purple-300"
+                  />
                 </div>
 
                 <div className="p-3 rounded-xl bg-red-950/20 border border-red-500/20 text-xs font-mono text-white/80 leading-relaxed">
                   <strong className="text-red-400">MediAI Clinical Note:</strong>{' '}
-                  {inboundIncident?.triageData?.aiSummary ||
-                    'Immediate surgical intervention required. Severe hemorrhage risk with secondary pneumothorax. Prepare Bay 01.'}
+                  {inboundIncident?.triageData?.aiSummary || 'No clinical assessment recorded yet.'}
+                  {inboundIncident?.triageData?.engine?.startsWith('rules') && (
+                    <span className="block mt-1 text-amber-300/80 not-italic">
+                      Generated by the offline protocol, not the clinical AI. Reassess on arrival.
+                    </span>
+                  )}
                 </div>
               </div>
 
