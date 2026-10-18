@@ -54,7 +54,7 @@
 1. ✅ **Real-Time Socket.io Layer** — All 4 roles share live situational awareness
 2. ✅ **OSRM Green Corridor** — AI-predicted optimal route with congestion avoidance
 3. ✅ **Live Resource Dashboard** — ICU beds, ventilators, ER wait time visible in real-time
-4. ✅ **Groq LLM Triage** — ESI 1–5 score in under 3 seconds with 94% accuracy
+4. ✅ **Groq LLM Triage** — ESI 1–5 score in under a second, with the engine that produced it recorded on every result
 5. ✅ **Zero-Wait Handover** — Bed reserved, trauma team alerted before ambulance arrives
 
 **Visual suggestion:** Side-by-side comparison table OR before/after diagram
@@ -79,7 +79,7 @@ DATA LAYER
 MongoDB Atlas (Geospatial) | Redis (GPS Cache) | Zustand (Client State)
            ↓
 AI ENGINE
-Groq LLM (Llama 3.1 70B) | OSRM Routing | Groq Whisper STT
+Groq LLM (openai/gpt-oss-120b) | OSRM Routing | Groq Whisper STT
            ↓
 COMMUNICATION LAYER
 Twilio WhatsApp Bot | Twilio Voice + IVR | EmailJS Alert Gateway
@@ -89,14 +89,14 @@ Twilio WhatsApp Bot | Twilio Voice + IVR | EmailJS Alert Gateway
 | Module | Technology | Function |
 |---|---|---|
 | Voice Triage | Groq Whisper + Llama 3.1 | ESI 1–5 in 3 seconds |
-| Hospital Allocation | MILP Algorithm + Groq LLM | Weighted hospital ranking |
+| Hospital Allocation | Weighted scoring + Groq LLM | Weighted hospital ranking |
 | Route Optimization | OSRM Public API | Real-time green corridor |
 | Surge Forecasting | Time-Series Model | 6–24h demand prediction |
 | Multi-Channel Intake | Twilio + EmailJS + Groq | SOS via web, call, and WhatsApp |
 
 **Visual suggestion:** Architecture diagram from the technical documentation
 
-**Speaker notes:** "The technical stack is production-grade. We use MongoDB's 2dsphere geospatial indexes for sub-millisecond hospital and ambulance proximity queries. The Socket.io layer pushes GPS updates every 2 seconds across all connected clients simultaneously. The AI triage uses Groq's free-tier Llama 3.1 70B model with structured JSON output to generate ESI scores with 94% accuracy."
+**Speaker notes:** "The technical stack is production-grade. We use MongoDB's 2dsphere geospatial indexes for sub-millisecond hospital and ambulance proximity queries. The Socket.io layer pushes GPS updates every 2 seconds across all connected clients simultaneously. The AI triage uses Groq's free-tier gpt-oss-120b model with structured JSON output to generate ESI scores, and every result records which engine produced it so a fallback is never reported as an AI assessment. We have not measured clinical accuracy against a labelled dataset, so we do not claim an accuracy figure."
 
 ---
 
@@ -149,7 +149,7 @@ Twilio WhatsApp Bot | Twilio Voice + IVR | EmailJS Alert Gateway
 
 🥇 **Zero-Wait ER Handover** — Unlike traditional EMS systems, MediRoute pre-reserves beds and pre-routes trauma teams while the ambulance is still en route. This eliminates the most dangerous delay in emergency care.
 
-🥇 **Context-Aware Allocation** — The MILP optimizer ensures a cardiac arrest patient is never sent to a hospital without a Cath Lab, regardless of distance. Specialty-awareness is built into the core algorithm.
+🥇 **Context-Aware Allocation** — The allocation engine ensures a cardiac arrest patient is never sent to a hospital without a Cath Lab, regardless of distance. Specialty-awareness is built into the core algorithm.
 
 🥇 **Multi-Channel Emergency Access** — Patients can trigger emergencies via app (SOS button), voice (AI triage), WhatsApp (text "SOS"), or phone call (Twilio IVR + Whisper transcription).
 
@@ -160,7 +160,7 @@ Twilio WhatsApp Bot | Twilio Voice + IVR | EmailJS Alert Gateway
 |---|---|
 | Core Architecture & Full-Stack MERN | Twilio WhatsApp Bot & Voice IVR |
 | 4 Operational Portals & Auth Engine | Whisper Speech-to-Text & EmailJS |
-| AI Triage Engine & MILP Allocation | Paramedic Field Experience & PWA |
+| AI Triage Engine & AI Hospital Allocation | Paramedic Field Experience & PWA |
 | 3D Globe & Mapbox 3D Command Center | Figma UI/UX Complete Design System |
 
 **Future Scope:**
@@ -187,7 +187,7 @@ A: No — the AI provides decision support with an ESI score and recommended spe
 A: All patient data is encrypted in transit (TLS) and at rest (MongoDB Atlas encryption). JWT tokens expire in 7 days. Vitals data is secured per emergency incident.
 
 **Q: Why Groq and not OpenAI?**
-A: Groq offers a completely free tier with Llama 3.1 70B which is comparable in medical NLP tasks to GPT-4. For an academic demo, free-tier speed and zero cost provide optimal efficiency.
+A: Groq offers a free tier with gpt-oss-120b and sub-second inference, which is what matters for triage at intake. We have not benchmarked it against GPT-4 on medical NLP, so we make no comparative claim. The deterministic clinical protocol underneath means a provider outage degrades the assessment rather than blocking a dispatch.
 
 **Q: How does the hospital allocation work mathematically?**
 A: We use a weighted multi-objective formula: Z = 0.35·TravelTime + 0.30·WaitTime + 0.25·(1 - SpecialtyMatch) − 0.10·CapacityScore. The hospital with the lowest Z score is allocated.

@@ -55,7 +55,7 @@ These bottlenecks cause delayed response times, ambulances arriving at overcrowd
              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              AI Services (Node.js + Groq API)               │
-│  Triage LLM │ MILP Allocation │ OSRM Routing │ Forecasting  │
+│  Triage LLM │ AI Hospital Allocation │ OSRM Routing │ Forecasting  │
 └─────────────────────────────────────────────────────────────┘
              │                        │
     ┌────────▼──────┐        ┌────────▼────────┐
@@ -82,7 +82,7 @@ These bottlenecks cause delayed response times, ambulances arriving at overcrowd
 | Database | MongoDB Atlas | Geospatial incident/hospital/ambulance data |
 | Cache | Redis | Active GPS positions, socket state |
 | Job Queue | BullMQ | Async AI triage + dispatch jobs |
-| AI LLM | Groq API (Llama 3.1 70B) | Free-tier NLP triage agent |
+| AI LLM | Groq API (openai/gpt-oss-120b) | Free-tier NLP triage agent |
 | STT | Groq Whisper + Web Speech API | Voice-to-text for emergency calls |
 | Routing | OSRM Public API | Open-source real-time routing |
 | Notifications | EmailJS | Real-time emergency dispatch alerts |
@@ -99,7 +99,7 @@ These bottlenecks cause delayed response times, ambulances arriving at overcrowd
 **How it works:**
 1. Patient speaks or types their emergency
 2. Browser's Web Speech API OR Groq Whisper API transcribes audio → text
-3. Prompt sent to **Groq Llama 3.1 70B** (free tier)
+3. Prompt sent to **Groq gpt-oss-120b** (free tier)
 4. LLM extracts: chief complaint, age, consciousness, bleeding severity, respiratory status
 5. Returns **ESI 1–5 score** (Emergency Severity Index) + required specialties + confidence
 

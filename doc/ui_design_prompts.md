@@ -42,7 +42,7 @@ Layout and Structure:
    - Paramedic Field HUD (Mobile navigation & telemetry vitals stream)
    - Hospital Emergency Room (Dynamic bed allocation & trauma intake)
    - City Command Dispatcher (City-wide GIS map & AI fleet allocation)
-5. Architectural Workflow Diagram: Step-by-step horizontal timeline demonstrating emergency detection -> AI triage classification -> dynamic MILP hospital matching -> automated green-corridor dispatch.
+5. Architectural Workflow Diagram: Step-by-step horizontal timeline demonstrating emergency detection -> AI triage classification -> dynamic weighted allocation hospital matching -> automated green-corridor dispatch.
 
 Style: Dark mission-critical UI, deep obsidian background (#0a0a0f), crisp typography, clean glassmorphic container cards, ultra-precise data visualization. Desktop viewport 16:9.
 ```

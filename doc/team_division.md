@@ -15,7 +15,7 @@
 | **Visual Computing** | 3D Interactive Command Globe | **Aryan** | ✅ Complete | Three.js / React Three Fiber rendering |
 | **GIS & Mapping** | Mapbox GL 3D Urban Command Center | **Aryan** | ✅ Complete | Fleet telemetry, incident pins & multi-angle controls |
 | **Portals & Analytics** | Admin & Hospital Command Portals | **Aryan** | ✅ Complete | Operations overview & capacity monitors |
-| **AI Systems** | AI Clinical Triage & MILP Allocation | **Aryan** | ✅ Complete | Groq LLM clinical reasoning & routing |
+| **AI Systems** | AI Clinical Triage & AI Hospital Allocation | **Aryan** | ✅ Complete | Groq LLM clinical reasoning & routing |
 | **PWA & Web App** | Progressive Web App Scaffolding | **Aryan** | ✅ Complete | Manifest, responsive design, offline readiness |
 | **Comms Suite** | Twilio WhatsApp Emergency Bot | **Neil** | 🔲 In Progress | Public chatbot intake & live updates |
 | **Comms Suite** | Twilio Interactive Voice Response (IVR) | **Neil** | 🔲 In Progress | Emergency call intake & automated dispatch |

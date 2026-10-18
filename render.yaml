@@ -13,8 +13,15 @@ services:
         value: production
       - key: MONGODB_URI
         sync: false
+      # Never commit this value. It was previously written here with `value:`,
+      # which published the production signing key to the repository and its
+      # history, allowing anyone who read it to mint a valid admin token.
+      # generateValue has Render create a strong secret and keep it out of git.
+      #
+      # The leaked key must still be rotated in the Render dashboard: removing
+      # it here does not remove it from earlier commits.
       - key: JWT_SECRET
-        value: mediroute_super_secret_jwt_key_2026_emergency_response
+        generateValue: true
       - key: GROQ_API_KEY
         sync: false
       - key: OPENROUTER_API_KEY

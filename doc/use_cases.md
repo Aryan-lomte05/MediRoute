@@ -10,7 +10,7 @@
 | **Admin / Dispatcher** | City emergency coordinator monitoring fleet telemetry |
 | **AI Triage Agent** | Automated LLM engine scoring ESI acuity and specialties |
 | **Dispatch Engine** | Automated geospatial ambulance assignment service |
-| **MILP Allocator** | Mixed Integer Linear Programming hospital optimization algorithm |
+| **weighted allocation Allocator** | Mixed Integer Linear Programming hospital optimization algorithm |
 | **OSRM Router** | Real-time road routing and green-corridor ETA service |
 | **Twilio WhatsApp** | Messaging intake and bidirectional emergency updates |
 | **Twilio Voice** | Interactive voice response and emergency intake call handler |
@@ -144,7 +144,7 @@ graph TB
 | **Actor** | Patient, AI Triage Agent |
 | **Precondition** | Patient has triggered SOS; microphone permission granted |
 | **Trigger** | Patient taps the voice triage button |
-| **Main Flow** | 1. Browser records audio (Web Speech API or MediaRecorder) → 2. Audio transcribed by Groq Whisper → 3. Transcript sent to Groq LLM → 4. ESI 1–5 score computed → 5. Required medical specialties identified → 6. Incident updated with triage data → 7. MILP allocator triggered |
+| **Main Flow** | 1. Browser records audio (Web Speech API or MediaRecorder) → 2. Audio transcribed by Groq Whisper → 3. Transcript sent to Groq LLM → 4. ESI 1–5 score computed → 5. Required medical specialties identified → 6. Incident updated with triage data → 7. weighted allocation allocator triggered |
 | **Alternate Flow** | Speech API unavailable → patient types complaint manually |
 | **Postcondition** | Incident has ESI level, AI summary, confidence score, specialty requirements |
 
@@ -261,7 +261,7 @@ Patient         System Gateway        AI Engine        Paramedic        Hospital
    │                  │──Find Ambulance───────────────────▶│                 │
    │                  │──dispatch_alert───────────────────▶│                 │
    │◀──Status Update──│                  │                 │──Accept────────▶│
-   │                  │──MILP Allocate──▶│                 │                 │
+   │                  │──weighted allocation Allocate──▶│                 │                 │
    │                  │◀─Hospital Rank───│                 │                 │
    │                  │──Pre-alert ER (Socket + EmailJS)────────────────────▶│
    │                  │                  │    │──GPS Ping─▶│                 │
