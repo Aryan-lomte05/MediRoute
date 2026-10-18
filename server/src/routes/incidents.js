@@ -1,458 +1,159 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - INCIDENT ROUTES & DISPATCH PIPELINE (routes/incidents.js)
+ * ==============================================================================
+ *
+ * WHAT IS WHERE:
+ * - Line 40-95:    Shared helpers (haversine, ETA, hospital candidate shaping)
+ * - Line 97-175:   allocateHospital() - ONE allocation implementation
+ * - Line 177-290:  runDispatchPipeline() - triage -> hospital -> ambulance
+ * - Line 292-390:  POST   /                  Create incident (PUBLIC - anonymous SOS)
+ * - Line 392-430:  GET    /                  List incidents (staff only)
+ * - Line 432-520:  GET    /stats/summary     Live operational summary
+ * - Line 522-570:  GET    /:id               Single incident (owner or staff)
+ * - Line 572-650:  PATCH  /:id/status        Status / vitals / notes update
+ * - Line 652-690:  POST   /:id/allocate      Re-run hospital allocation
+ *
+ * AUTH POLICY (deliberate, read before changing):
+ * - POST / is PUBLIC. A citizen reporting an emergency must never hit a login
+ *   wall. Creation returns a one-time `trackingToken`.
+ * - GET /:id accepts that token, or a staff session. An anonymous caller sees a
+ *   reduced tracking view with no third-party medical detail.
+ * - GET / and POST /:id/allocate are staff-only: they expose city-wide PII.
+ * - PATCH /:id/status accepts staff sessions, or the reporter's own token for
+ *   cancellation only.
+ *
+ * All model selection and triage reasoning lives in services/aiService.js.
+ * ==============================================================================
+ */
+
 const express = require('express')
+const crypto = require('crypto')
 const Incident = require('../models/Incident')
 const Ambulance = require('../models/Ambulance')
 const Hospital = require('../models/Hospital')
 const { auth, authorize, optionalAuth } = require('../middleware/auth')
-const axios = require('axios')
+const aiService = require('../services/aiService')
 
 const router = express.Router()
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
+const STAFF_ROLES = ['admin', 'paramedic', 'hospital_staff']
 
-// Helper: Rule-based clinical triage engine
-function clinicalRuleTriage(complaintText = '', vitals = {}) {
-  const text = complaintText.toLowerCase()
-  let esiLevel = 3
-  let aiSummary = 'Moderate urgency emergency. Stable vitals, secondary evaluation recommended.'
-  let requiredSpecialties = ['GENERAL_SURGERY']
-  let criticalAlerts = []
-  let recommendedActions = ['Check vitals manually', 'Establish IV line', 'Transport to nearest ER']
+const ACTIVE_STATUSES = [
+  'PENDING',
+  'TRIAGE_COMPLETE',
+  'DISPATCHING',
+  'DISPATCHED',
+  'EN_ROUTE_TO_PATIENT',
+  'AT_PATIENT',
+  'EN_ROUTE_TO_HOSPITAL',
+]
 
-  if (text.includes('cardiac') || text.includes('chest pain') || text.includes('heart attack') || text.includes('angina')) {
-    esiLevel = 1
-    aiSummary = 'Suspected acute coronary syndrome / STEMI with active myocardial ischemia. Immediate cardiac catheterization prioritized.'
-    requiredSpecialties = ['CARDIAC_CATH_LAB', 'ICU']
-    criticalAlerts = ['High risk of ventricular fibrillation', 'Potential STEMI']
-    recommendedActions = ['High-flow O2 if SpO2 < 90%', 'Administer 325mg chewable aspirin', 'Continuous 12-lead ECG monitoring', 'Alert Cardiac Cath Lab team']
-  } else if (text.includes('accident') || text.includes('trauma') || text.includes('collision') || text.includes('bleeding') || text.includes('fracture')) {
-    esiLevel = 1
-    aiSummary = 'High-velocity blunt or penetrating polytrauma with acute hemorrhage and fracture risk. Immediate trauma surgical activation warranted.'
-    requiredSpecialties = ['LEVEL_1_TRAUMA', 'GENERAL_SURGERY', 'NEUROSURGERY', 'ORTHOPEDIC']
-    criticalAlerts = ['Hemorrhagic shock risk', 'Suspected pelvic/spinal injury']
-    recommendedActions = ['Full C-spine immobilization', 'Large-bore bilateral IV access (16G)', 'Control external bleeding with pressure/tourniquet', 'Alert Trauma Bay 01']
-  } else if (text.includes('unconscious') || text.includes('fainting') || text.includes('unresponsive') || text.includes('syncope') || text.includes('coma')) {
-    esiLevel = 1
-    aiSummary = 'Unresponsive patient with severe altered mental status and GCS < 8. Critical airway compromise risk.'
-    requiredSpecialties = ['ICU', 'NEUROSURGERY', 'STROKE_CENTER']
-    criticalAlerts = ['Airway compromise', 'Severe hypoxia risk']
-    recommendedActions = ['Inspect and secure airway', 'Position in left lateral recovery if breathing', 'Check point-of-care blood glucose', 'Prepare rapid sequence intubation (RSI)']
-  } else if (text.includes('stroke') || text.includes('speech') || text.includes('paralysis') || text.includes('facial droop')) {
-    esiLevel = 1
-    aiSummary = 'Acute neurological deficit consistent with ischemic stroke within therapeutic window. Time-critical brain preservation required.'
-    requiredSpecialties = ['STROKE_CENTER', 'NEUROSURGERY']
-    criticalAlerts = ['Active ischemic penumbra', 'Window for tPA / mechanical thrombectomy']
-    recommendedActions = ['Perform F.A.S.T. neurological scoring', 'Keep patient NPO (no food/water)', 'Pre-alert Stroke Team for priority CT angiography']
-  } else if (text.includes('fire') || text.includes('burn')) {
-    esiLevel = 2
-    aiSummary = 'Thermal/chemical burn injury with potential inhalation trauma. Rapid fluid replacement and specialized burn care required.'
-    requiredSpecialties = ['BURN_UNIT', 'ICU', 'GENERAL_SURGERY']
-    criticalAlerts = ['Inhalation injury', 'Systemic hypovolemia']
-    recommendedActions = ['Cool with clean running water', 'Apply sterile non-adherent dressing', 'Initiate Parkland formula IV fluid resuscitation', 'Monitor airway for soot/edema']
-  } else if (text.includes('breath') || text.includes('respiratory') || text.includes('asthma') || text.includes('choking')) {
-    esiLevel = 2
-    aiSummary = 'Severe acute respiratory distress with impending respiratory failure. Bronchodilator therapy and supplemental oxygen required.'
-    requiredSpecialties = ['ICU', 'PEDIATRIC_ICU']
-    criticalAlerts = ['Bronchospasm', 'SpO2 critical decline']
-    recommendedActions = ['Administer humidified O2 via non-rebreather mask', 'Nebulize albuterol/ipratropium', 'Prepare Bag-Valve-Mask if fatigue onset']
-  }
+// Average urban ambulance speed under lights, used to turn a real distance into
+// an ETA. Previously these ETAs were Math.random().
+const AMBULANCE_KMH = parseFloat(process.env.AMBULANCE_AVG_KMH || '28')
 
-  // Factor in real vitals if provided
-  if (vitals?.spO2 && vitals.spO2 < 88) {
-    esiLevel = 1
-    criticalAlerts.push('Severe hypoxemia (SpO2 < 88%)')
-  }
-  if (vitals?.heartRate && (vitals.heartRate > 140 || vitals.heartRate < 45)) {
-    esiLevel = 1
-    criticalAlerts.push(`Severe hemodynamically unstable heart rate (${vitals.heartRate} bpm)`)
-  }
+// ──────────────────────────────────────────────────────────────────────────────
+// SHARED HELPERS
+// ──────────────────────────────────────────────────────────────────────────────
 
+/** Great-circle distance in km between two [lng, lat] pairs. */
+function haversineKm(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== 2 || b.length !== 2) return null
+  const R = 6371
+  const toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(b[1] - a[1])
+  const dLng = toRad(b[0] - a[0])
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a[1])) * Math.cos(toRad(b[1])) * Math.sin(dLng / 2) ** 2
+  return Math.round(2 * R * Math.asin(Math.sqrt(h)) * 10) / 10
+}
+
+/** Minutes to cover a distance at ambulance speed. Null distance yields null. */
+function etaMinutes(distanceKm) {
+  if (distanceKm == null) return null
+  return Math.max(3, Math.round((distanceKm / AMBULANCE_KMH) * 60))
+}
+
+/** Shape a Hospital document into the plain candidate the AI service expects. */
+function toCandidate(hospital, patientCoords) {
+  const coords = hospital.location?.coordinates
+  const distanceKm = patientCoords ? haversineKm(patientCoords, coords) : null
   return {
-    esiLevel,
-    aiSummary,
-    aiConfidence: 0.94,
-    requiredSpecialties,
-    criticalAlerts,
-    recommendedActions,
+    id: String(hospital._id),
+    name: hospital.name,
+    icuAvailable: hospital.resources?.icuBeds?.available ?? 0,
+    traumaAvailable: hospital.resources?.traumaBeds?.available ?? 0,
+    erWaitTime: hospital.queueStatus?.erWaitTimeMinutes ?? 20,
+    capabilities: hospital.capabilities || [],
+    diversion: Boolean(hospital.queueStatus?.diversionStatus),
+    location: coords,
+    distanceKm,
   }
 }
 
-// Helper: Call Groq / OpenRouter LLM for clinical triage
-async function performAITriage({ chiefComplaint, vitals, voiceTranscript, age, gender }) {
-  const complaint = chiefComplaint || voiceTranscript || 'Emergency SOS dispatch'
-  const prompt = `You are an emergency triage physician AI. Analyze this patient presentation and output structured clinical triage.
+// ──────────────────────────────────────────────────────────────────────────────
+// HOSPITAL ALLOCATION - single implementation
+// ──────────────────────────────────────────────────────────────────────────────
 
-Patient Info:
-- Chief Complaint / Voice Transcript: "${complaint}"
-- Age: ${age || 'Adult'}
-- Gender: ${gender || 'Unknown'}
-- Vitals: ${vitals ? JSON.stringify(vitals) : 'Telemetry pending'}
+/**
+ * Rank every active hospital for an incident and persist the scores.
+ *
+ * This previously existed three times over (here, in the dispatch pipeline, and
+ * in routes/ai.js) with three different weightings and random travel ETAs, so
+ * the same patient could be allocated differently depending on which path ran.
+ * There is now one implementation.
+ *
+ * @returns {Promise<{ranked: Array, top: object|null, engine: string}>}
+ */
+async function allocateHospital(incident) {
+  const patientCoords = incident.location?.coordinates
+  const hospitals = await Hospital.find({ isActive: true }).limit(15)
+  if (!hospitals.length) return { ranked: [], top: null, engine: 'none' }
 
-Respond ONLY with a valid JSON object (no markdown, no backticks, no preamble):
-{
-  "esiLevel": <integer 1 to 5, where 1=resuscitation/immediate, 2=emergent, 3=urgent, 4=semi-urgent, 5=non-urgent>,
-  "aiSummary": "<exact 2-sentence clinical diagnosis and rationale>",
-  "aiConfidence": <number 0.85 to 0.99>,
-  "requiredSpecialties": ["<specialty from: CARDIAC_CATH_LAB, LEVEL_1_TRAUMA, STROKE_CENTER, NEUROSURGERY, BURN_UNIT, ICU, GENERAL_SURGERY, ORTHOPEDIC, PEDIATRIC_ICU>"],
-  "criticalAlerts": ["<critical hazard 1>", "<critical hazard 2>"],
-  "recommendedActions": ["<action 1>", "<action 2>", "<action 3>"]
-}`
+  const candidates = hospitals.map((h) => toCandidate(h, patientCoords))
 
-  // 1. Try Groq (ultra fast inference)
-  if (GROQ_API_KEY) {
-    try {
-      const groqRes = await axios.post(
-        'https://api.groq.com/openai/v1/chat/completions',
-        {
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
-          max_tokens: 450,
-          response_format: { type: 'json_object' },
-        },
-        {
-          headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-          timeout: 4500,
-        }
-      )
-      const parsed = JSON.parse(groqRes.data.choices[0].message.content.trim())
-      if (parsed?.esiLevel) return parsed
-    } catch (err) {
-      console.warn('[AI Triage] Groq error, trying fallback:', err.message)
-    }
-  }
+  const { rankedHospitals, engine } = await aiService.rankHospitals({
+    esiLevel: incident.triageData?.esiLevel || 3,
+    requiredSpecialties: incident.triageData?.requiredSpecialties || [],
+    hospitals: candidates,
+  })
 
-  // 2. Try OpenRouter
-  if (OPENROUTER_API_KEY) {
-    try {
-      const orRes = await axios.post(
-        'https://openrouter.ai/api/v1/chat/completions',
-        {
-          model: 'meta-llama/llama-3.1-8b-instruct:free',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
-          max_tokens: 450,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://mediroute.app',
-          },
-          timeout: 5000,
-        }
-      )
-      const raw = orRes.data.choices[0].message.content.trim()
-      const jsonStart = raw.indexOf('{')
-      const jsonEnd = raw.lastIndexOf('}')
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        const parsed = JSON.parse(raw.substring(jsonStart, jsonEnd + 1))
-        if (parsed?.esiLevel) return parsed
-      }
-    } catch (err) {
-      console.warn('[AI Triage] OpenRouter error, using clinical rules:', err.message)
-    }
-  }
+  const byId = new Map(hospitals.map((h) => [String(h._id), h]))
+  const candidateById = new Map(candidates.map((c) => [c.id, c]))
 
-  // 3. Fallback: clinically sound deterministic triage
-  return clinicalRuleTriage(complaint, vitals)
-}
-
-// POST /api/incidents — Create emergency incident (patient / citizen)
-router.post('/', optionalAuth, async (req, res, next) => {
-  try {
-    const { location, chiefComplaint, vitals, voiceTranscript, patientDetails } = req.body
-
-    if (!location?.coordinates || location.coordinates.length !== 2) {
-      return res.status(400).json({ message: 'Valid location coordinates [lng, lat] required' })
-    }
-
-    const patientName = req.user?.name || patientDetails?.name || 'Citizen in Distress'
-    const patientPhone = req.user?.phone || patientDetails?.phone || '+91 90000 11111'
-    const patientBlood = req.user?.emergencyProfile?.bloodType || patientDetails?.bloodType || 'O+'
-    const patientAllergies = req.user?.emergencyProfile?.allergies || patientDetails?.allergies || []
-    const patientConditions = req.user?.emergencyProfile?.conditions || patientDetails?.conditions || []
-
-    // Create initial incident in MongoDB
-    const incident = await Incident.create({
-      patient: req.userId || null,
-      patientDetails: {
-        name: patientName,
-        bloodType: patientBlood,
-        allergies: patientAllergies,
-        conditions: patientConditions,
-        phone: patientPhone,
-      },
-      triageData: {
-        chiefComplaint: chiefComplaint || 'Emergency Assistance Requested',
-        vitals: vitals || null,
-        esiLevel: 2,
-        aiSummary: 'Emergency dispatch initialized. AI clinical triage evaluating presentation...',
-        requiredSpecialties: [],
-      },
-      location: {
-        type: 'Point',
-        coordinates: location.coordinates,
-        address: location.address || 'Bandra West, Mumbai',
-      },
-      voiceTranscript: voiceTranscript || '',
-      status: 'PENDING',
-      timestamps: {
-        created: new Date(),
-      },
-    })
-
-    const io = req.app.get('io')
-    if (io) {
-      io.to('admin').emit('new_incident', incident)
-      io.to('hospital').emit('new_incident', incident)
-    }
-
-    // Trigger AI Triage and Auto-Assignment asynchronously
-    triggerAITriage(incident._id, { chiefComplaint, vitals, voiceTranscript }, io)
-
-    res.status(201).json({ incident })
-  } catch (err) {
-    next(err)
-  }
-})
-
-// GET /api/incidents — List incidents (filtered by role or query)
-router.get('/', optionalAuth, async (req, res, next) => {
-  try {
-    let query = {}
-    const { status, limit = 50, page = 1 } = req.query
-
-    if (req.user?.role === 'patient') query.patient = req.userId
-    if (req.user?.role === 'paramedic' && req.user.ambulanceId) query.assignedAmbulance = req.user.ambulanceId
-    if (req.user?.role === 'hospital_staff' && req.user.hospitalId) query.allocatedHospital = req.user.hospitalId
-    if (status) query.status = status
-
-    const [incidents, total] = await Promise.all([
-      Incident.find(query)
-        .populate('assignedAmbulance', 'vehicleNumber vehicleType currentLocation status equipment')
-        .populate('allocatedHospital', 'name location queueStatus resources capabilities')
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .skip((parseInt(page) - 1) * parseInt(limit)),
-      Incident.countDocuments(query),
-    ])
-
-    res.json({ incidents, total, page: parseInt(page), limit: parseInt(limit) })
-  } catch (err) {
-    next(err)
-  }
-})
-
-// GET /api/incidents/stats/summary — Live operational summary for City Command & Dashboards
-router.get('/stats/summary', optionalAuth, async (req, res, next) => {
-  try {
-    const [
-      totalIncidents,
-      activeIncidents,
-      completedIncidents,
-      esi1Count,
-      esi2Count,
-      esi3Count,
-      esi4Count,
-      ambulances,
-      hospitals,
-    ] = await Promise.all([
-      Incident.countDocuments(),
-      Incident.countDocuments({ status: { $in: ['DISPATCHED', 'TRIAGE_COMPLETE', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL'] } }),
-      Incident.countDocuments({ status: 'COMPLETED' }),
-      Incident.countDocuments({ 'triageData.esiLevel': 1, status: { $nin: ['COMPLETED', 'CANCELLED'] } }),
-      Incident.countDocuments({ 'triageData.esiLevel': 2, status: { $nin: ['COMPLETED', 'CANCELLED'] } }),
-      Incident.countDocuments({ 'triageData.esiLevel': 3, status: { $nin: ['COMPLETED', 'CANCELLED'] } }),
-      Incident.countDocuments({ 'triageData.esiLevel': { $gte: 4 }, status: { $nin: ['COMPLETED', 'CANCELLED'] } }),
-      Ambulance.find({ isActive: true }),
-      Hospital.find({ isActive: true }),
-    ])
-
-    // Fleet status
-    const fleetTotal = ambulances.length || 4
-    const fleetAvailable = ambulances.filter((a) => a.status === 'AVAILABLE').length
-    const fleetInRoute = ambulances.filter((a) => ['DISPATCHED', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL'].includes(a.status)).length
-
-    // Bed utilization
-    let totalIcu = 0
-    let availIcu = 0
-    let totalTrauma = 0
-    let availTrauma = 0
-    hospitals.forEach((h) => {
-      totalIcu += h.resources?.icuBeds?.total || 20
-      availIcu += h.resources?.icuBeds?.available ?? 5
-      totalTrauma += h.resources?.traumaBeds?.total || 10
-      availTrauma += h.resources?.traumaBeds?.available ?? 3
-    })
-    const totalBeds = totalIcu + totalTrauma || 120
-    const occupiedBeds = (totalIcu - availIcu) + (totalTrauma - availTrauma) || 88
-    const utilizationRate = Math.min(100, Math.round((occupiedBeds / totalBeds) * 100))
-
-    // 12-hour surge forecast
-    const currentHour = new Date().getHours()
-    const surgeForecast = []
-    for (let i = 0; i < 12; i++) {
-      const h = (currentHour + i) % 24
-      const baseLoad = (h >= 18 && h <= 23)
-        ? 74 + Math.round(Math.sin((h - 18) * 0.6) * 16)
-        : (h >= 8 && h <= 13)
-        ? 62 + Math.round(Math.sin((h - 8) * 0.7) * 14)
-        : 38 + Math.round(Math.random() * 12)
-      surgeForecast.push({
-        time: new Date(Date.now() + i * 3600000).toISOString(),
-        hour: `${String(h).padStart(2, '0')}:00`,
-        predictedLoad: Math.min(96, Math.max(30, baseLoad)),
-        confidence: Math.round(88 + Math.random() * 9),
-      })
-    }
-
-    res.json({
-      summary: {
-        total: totalIncidents,
-        active: activeIncidents,
-        completed: completedIncidents,
-        avgDelaySeconds: 42,
-        esiCounts: {
-          esi1: esi1Count,
-          esi2: esi2Count,
-          esi3: esi3Count,
-          esi4: esi4Count,
-        },
-        fleet: {
-          total: fleetTotal,
-          available: fleetAvailable,
-          inRoute: fleetInRoute,
-        },
-        beds: {
-          total: totalBeds,
-          occupied: occupiedBeds,
-          utilizationRate,
-        },
-        surgeForecast,
-      },
-    })
-  } catch (err) {
-    next(err)
-  }
-})
-
-// GET /api/incidents/:id — Get single incident
-router.get('/:id', optionalAuth, async (req, res, next) => {
-  try {
-    const incident = await Incident.findById(req.params.id)
-      .populate('patient', 'name phone emergencyProfile')
-      .populate('assignedAmbulance')
-      .populate('allocatedHospital')
-      .populate('hospitalAllocationScores.hospital', 'name location resources queueStatus capabilities')
-    if (!incident) return res.status(404).json({ message: 'Incident not found' })
-    res.json({ incident })
-  } catch (err) {
-    next(err)
-  }
-})
-
-// PATCH /api/incidents/:id/status — Update status & vitals (paramedic/hospital/admin/patient)
-router.patch('/:id/status', optionalAuth, async (req, res, next) => {
-  try {
-    const { status, vitals, notes } = req.body
-    const update = {}
-    if (status) update.status = status
-    if (notes) update.notes = notes
-
-    // Update timestamps
-    const tsMap = {
-      TRIAGE_COMPLETE: 'timestamps.triageCompleted',
-      DISPATCHED: 'timestamps.dispatched',
-      EN_ROUTE_TO_PATIENT: 'timestamps.dispatched',
-      AT_PATIENT: 'timestamps.pickedUp',
-      EN_ROUTE_TO_HOSPITAL: 'timestamps.dispatched',
-      ARRIVED_AT_HOSPITAL: 'timestamps.arrivedAtHospital',
-      COMPLETED: 'timestamps.completed',
-      CANCELLED: 'timestamps.completed',
-    }
-    if (tsMap[status]) update[tsMap[status]] = new Date()
-    if (vitals) update['triageData.vitals'] = vitals
-
-    const incident = await Incident.findByIdAndUpdate(req.params.id, update, { new: true })
-      .populate('assignedAmbulance')
-      .populate('allocatedHospital')
-
-    if (!incident) return res.status(404).json({ message: 'Incident not found' })
-
-    // If incident is completed or cancelled, free up the ambulance
-    if ((status === 'COMPLETED' || status === 'CANCELLED') && incident.assignedAmbulance) {
-      await Ambulance.findByIdAndUpdate(incident.assignedAmbulance._id || incident.assignedAmbulance, {
-        status: 'AVAILABLE',
-        currentIncident: null,
-      })
-    }
-
-    // Broadcast status update
-    const io = req.app.get('io')
-    if (io) {
-      io.to(`incident_${incident._id}`).emit('incident_status', { incidentId: incident._id, status, incident })
-      io.to('hospital').emit('incident_status', { incidentId: incident._id, status, incident })
-      io.to('admin').emit('incident_status', { incidentId: incident._id, status, incident })
-      if (incident.assignedAmbulance) {
-        io.to(`ambulance_${incident.assignedAmbulance._id || incident.assignedAmbulance}`).emit('incident_status', { incidentId: incident._id, status, incident })
-      }
-    }
-
-    res.json({ incident })
-  } catch (err) {
-    next(err)
-  }
-})
-
-// POST /api/incidents/:id/allocate — Optimize and rank hospital allocation
-router.post('/:id/allocate', optionalAuth, async (req, res, next) => {
-  try {
-    const incident = await Incident.findById(req.params.id)
-    if (!incident) return res.status(404).json({ message: 'Incident not found' })
-
-    // Find active hospitals
-    const hospitals = await Hospital.find({ isActive: true }).limit(10)
-    if (hospitals.length === 0) {
-      return res.status(404).json({ message: 'No hospitals available' })
-    }
-
-    const requiredSpecialties = incident.triageData?.requiredSpecialties || []
-    const rankedHospitals = hospitals.map((h) => {
-      let specialtyMatch = 0.5
-      if (requiredSpecialties.length > 0) {
-        const matches = requiredSpecialties.filter((s) => (h.capabilities || []).includes(s)).length
-        specialtyMatch = matches / requiredSpecialties.length
-      } else {
-        specialtyMatch = 0.8
-      }
-
-      const icuAvail = h.resources?.icuBeds?.available || 0
-      const traumaAvail = h.resources?.traumaBeds?.available || 0
-      const capacityScore = Math.min((icuAvail * 2 + traumaAvail * 3) / 15, 1)
-      const waitMinutes = h.queueStatus?.erWaitTimeMinutes || 15
-      const waitScore = Math.max(0, 1 - waitMinutes / 60)
-      const diversionPenalty = h.queueStatus?.diversionStatus ? 0.6 : 0
-
-      const overallScore = Math.max(0.1, 0.35 * specialtyMatch + 0.35 * capacityScore + 0.3 * waitScore - diversionPenalty)
-
+  // Re-attach the hospital documents and enforce hard operational constraints
+  // the model is not allowed to override: a diverting hospital can never rank
+  // first unless every option is diverting.
+  let ranked = rankedHospitals
+    .filter((r) => byId.has(String(r.id)))
+    .map((r) => {
+      const candidate = candidateById.get(String(r.id))
       return {
-        id: h._id,
-        hospital: h,
-        score: parseFloat(overallScore.toFixed(3)),
-        travelEta: Math.floor(Math.random() * 8) + 4,
-        waitTime: waitMinutes,
-        specialtyMatch: parseFloat(specialtyMatch.toFixed(2)),
-        capacityScore: parseFloat(capacityScore.toFixed(2)),
-        reason: `${h.name}: ${icuAvail} ICU / ${traumaAvail} Trauma beds ready · ${waitMinutes}m wait`,
+        id: String(r.id),
+        hospital: byId.get(String(r.id)),
+        score: Number.isFinite(Number(r.score)) ? parseFloat(Number(r.score).toFixed(3)) : 0,
+        // Trust our own geometry over a model-estimated ETA.
+        travelEta: etaMinutes(candidate?.distanceKm) ?? r.travelEta ?? null,
+        distanceKm: candidate?.distanceKm ?? null,
+        waitTime: candidate?.erWaitTime ?? r.waitTime ?? null,
+        specialtyMatch: Number(r.specialtyMatch) || 0,
+        capacityScore: Number(r.capacityScore) || 0,
+        diversion: candidate?.diversion || false,
+        reason: String(r.reason || '').slice(0, 200),
       }
-    }).sort((a, b) => b.score - a.score)
+    })
+    .sort((a, b) => b.score - a.score)
 
-    const topHospital = rankedHospitals[0]
+  const open = ranked.filter((r) => !r.diversion)
+  if (open.length) ranked = [...open, ...ranked.filter((r) => r.diversion)]
 
+  const top = ranked[0] || null
+
+  if (top) {
     await Incident.findByIdAndUpdate(incident._id, {
-      allocatedHospital: topHospital.id,
-      hospitalAllocationScores: rankedHospitals.map((r) => ({
+      allocatedHospital: top.id,
+      hospitalAllocationScores: ranked.map((r) => ({
         hospital: r.id,
         score: r.score,
         travelEta: r.travelEta,
@@ -461,166 +162,596 @@ router.post('/:id/allocate', optionalAuth, async (req, res, next) => {
         capacityScore: r.capacityScore,
       })),
     })
-
-    const io = req.app.get('io')
-    if (io) {
-      io.to(`incident_${incident._id}`).emit('hospital_allocated', { incidentId: incident._id, allocatedHospital: topHospital })
-      io.to('hospital').emit('incoming_patient', { incidentId: incident._id, incident, allocatedHospital: topHospital })
-      io.to('admin').emit('hospital_allocated', { incidentId: incident._id, allocatedHospital: topHospital })
-    }
-
-    res.json({ rankedHospitals, allocatedHospital: topHospital })
-  } catch (err) {
-    next(err)
   }
-})
 
-// GET /api/incidents/stats/summary — Admin stats
-router.get('/stats/summary', optionalAuth, async (req, res, next) => {
+  return { ranked, top, engine }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DISPATCH PIPELINE
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Triage, allocate a hospital, then dispatch the nearest ambulance.
+ *
+ * Runs detached from the HTTP response so the citizen's SOS returns instantly;
+ * every stage broadcasts over Socket.IO as it completes.
+ */
+async function runDispatchPipeline(incidentId, io) {
   try {
-    const [total, active, completed, today] = await Promise.all([
-      Incident.countDocuments(),
-      Incident.countDocuments({ status: { $in: ['PENDING', 'DISPATCHING', 'DISPATCHED', 'TRIAGE_COMPLETE', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL'] } }),
-      Incident.countDocuments({ status: 'COMPLETED' }),
-      Incident.countDocuments({ createdAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) } }),
-    ])
+    const incident = await Incident.findById(incidentId)
+    if (!incident) return
 
-    const esiDistribution = await Incident.aggregate([
-      { $group: { _id: '$triageData.esiLevel', count: { $sum: 1 } } },
-      { $sort: { _id: 1 } },
-    ])
+    // ── 1. Clinical triage ───────────────────────────────────────────────────
+    const triage = await aiService.triageIncident({
+      chiefComplaint: incident.triageData?.chiefComplaint,
+      vitals: incident.triageData?.vitals,
+      voiceTranscript: incident.voiceTranscript,
+      age: incident.patientDetails?.age,
+      gender: incident.patientDetails?.gender,
+      reporterType: incident.reporterType,
+    })
 
-    res.json({ total, active, completed, today, esiDistribution })
-  } catch (err) {
-    next(err)
-  }
-})
-
-// Async AI triage trigger & Auto-Allocation Pipeline
-async function triggerAITriage(incidentId, data, io) {
-  try {
-    console.log(`[AI Triage Pipeline] Processing incident ${incidentId}...`)
-    const triageResult = await performAITriage(data)
-
-    const { esiLevel, aiSummary, aiConfidence, requiredSpecialties, criticalAlerts, recommendedActions } = triageResult
-
-    // 1. Update incident with clinical triage results
     await Incident.findByIdAndUpdate(incidentId, {
-      'triageData.esiLevel': esiLevel || 2,
-      'triageData.aiSummary': aiSummary || 'Immediate emergency response deployed.',
-      'triageData.aiConfidence': aiConfidence || 0.95,
-      'triageData.requiredSpecialties': requiredSpecialties || [],
-      'triageData.criticalAlerts': criticalAlerts || [],
-      'triageData.recommendedActions': recommendedActions || [],
+      'triageData.esiLevel': triage.esiLevel,
+      'triageData.aiSummary': triage.aiSummary,
+      'triageData.aiConfidence': triage.aiConfidence,
+      'triageData.requiredSpecialties': triage.requiredSpecialties,
+      'triageData.criticalAlerts': triage.criticalAlerts,
+      'triageData.recommendedActions': triage.recommendedActions,
+      'triageData.engine': triage.engine,
+      'triageData.triagedAt': new Date(),
       status: 'TRIAGE_COMPLETE',
       'timestamps.triageCompleted': new Date(),
     })
 
-    console.log(`[AI Triage Pipeline] Incident ${incidentId} triaged: ESI ${esiLevel}`)
+    console.log(`[Dispatch] ${incident.incidentNumber} triaged ESI ${triage.esiLevel} via ${triage.engine}`)
 
+    const triagePayload = { incidentId, ...triage }
     if (io) {
-      io.to(`incident_${incidentId}`).emit('triage_complete', { incidentId, esiLevel, aiSummary, requiredSpecialties, criticalAlerts, recommendedActions })
-      io.to('admin').emit('triage_complete', { incidentId, esiLevel, aiSummary, requiredSpecialties, criticalAlerts, recommendedActions })
-      io.to('hospital').emit('triage_complete', { incidentId, esiLevel, aiSummary, requiredSpecialties, criticalAlerts, recommendedActions })
-    }
-
-    const incident = await Incident.findById(incidentId)
-    if (!incident) return
-
-    // 2. Auto-allocate optimal hospital based on clinical specialty & capacity
-    const hospitals = await Hospital.find({ isActive: true })
-    if (hospitals.length > 0) {
-      const rankedHospitals = hospitals.map((h) => {
-        let specialtyMatch = 0.6
-        if (requiredSpecialties?.length > 0) {
-          const matched = requiredSpecialties.filter((s) => (h.capabilities || []).includes(s)).length
-          specialtyMatch = matched / requiredSpecialties.length
-        }
-        const icuAvail = h.resources?.icuBeds?.available || 0
-        const traumaAvail = h.resources?.traumaBeds?.available || 0
-        const capacity = Math.min((icuAvail * 2 + traumaAvail * 3) / 12, 1)
-        const wait = h.queueStatus?.erWaitTimeMinutes || 10
-        const diversionPenalty = h.queueStatus?.diversionStatus ? 0.7 : 0
-        const score = 0.4 * specialtyMatch + 0.35 * capacity + 0.25 * (1 - Math.min(wait / 60, 1)) - diversionPenalty
-
-        return {
-          id: h._id,
-          hospital: h,
-          score: Math.max(0.2, parseFloat(score.toFixed(3))),
-          travelEta: Math.floor(Math.random() * 6) + 4,
-          waitTime: wait,
-        }
-      }).sort((a, b) => b.score - a.score)
-
-      const topHospital = rankedHospitals[0]
-      await Incident.findByIdAndUpdate(incidentId, {
-        allocatedHospital: topHospital.id,
-        hospitalAllocationScores: rankedHospitals.map((r) => ({
-          hospital: r.id,
-          score: r.score,
-          travelEta: r.travelEta,
-          waitTime: r.waitTime,
-        })),
-      })
-
-      if (io) {
-        io.to('hospital').emit('incoming_patient', { incidentId, incident, hospital: topHospital.hospital })
-        io.to(`incident_${incidentId}`).emit('hospital_allocated', { incidentId, allocatedHospital: topHospital.hospital })
+      for (const room of [`incident_${incidentId}`, 'admin', 'hospital']) {
+        io.to(room).emit('triage_complete', triagePayload)
       }
     }
 
-    // 3. Auto-find and dispatch nearest available ambulance
+    // ── 2. Hospital allocation ───────────────────────────────────────────────
+    const fresh = await Incident.findById(incidentId)
+    const { top, engine: allocEngine } = await allocateHospital(fresh)
+
+    if (top && io) {
+      io.to('hospital').emit('incoming_patient', { incidentId, incident: fresh, hospital: top.hospital })
+      io.to(`incident_${incidentId}`).emit('hospital_allocated', {
+        incidentId,
+        allocatedHospital: top.hospital,
+        travelEta: top.travelEta,
+        engine: allocEngine,
+      })
+      io.to('admin').emit('hospital_allocated', { incidentId, allocatedHospital: top.hospital })
+    }
+
+    // ── 3. Nearest available ambulance ───────────────────────────────────────
     let ambulance = null
     try {
       ambulance = await Ambulance.findOne({
         status: 'AVAILABLE',
-        currentLocation: {
-          $nearSphere: {
-            $geometry: incident.location,
-            $maxDistance: 50000,
-          },
-        },
+        isActive: true,
+        currentLocation: { $nearSphere: { $geometry: fresh.location, $maxDistance: 50000 } },
       })
     } catch (geoErr) {
-      ambulance = await Ambulance.findOne({ status: 'AVAILABLE' })
+      // A missing 2dsphere index must not block a dispatch.
+      console.warn('[Dispatch] Geospatial query failed, falling back to any available unit:', geoErr.message)
     }
 
-    // If no ambulance with status AVAILABLE, pick any active ambulance
+    if (!ambulance) ambulance = await Ambulance.findOne({ status: 'AVAILABLE', isActive: true })
+
     if (!ambulance) {
-      ambulance = await Ambulance.findOne({ isActive: true })
+      console.warn(`[Dispatch] No available ambulance for ${fresh.incidentNumber} - queued`)
+      if (io) {
+        io.to('admin').emit('dispatch_blocked', {
+          incidentId,
+          reason: 'No available ambulance in range',
+          esiLevel: triage.esiLevel,
+        })
+      }
+      return
     }
 
-    if (ambulance) {
-      await Promise.all([
-        Incident.findByIdAndUpdate(incidentId, {
-          assignedAmbulance: ambulance._id,
-          status: 'DISPATCHED',
-          'timestamps.dispatched': new Date(),
-        }),
-        Ambulance.findByIdAndUpdate(ambulance._id, {
-          status: 'DISPATCHED',
-          currentIncident: incidentId,
-        }),
-      ])
+    const distanceKm = haversineKm(fresh.location?.coordinates, ambulance.currentLocation?.coordinates)
 
-      console.log(`[AI Triage Pipeline] Assigned unit ${ambulance.vehicleNumber} to incident ${incidentId}`)
+    await Promise.all([
+      Incident.findByIdAndUpdate(incidentId, {
+        assignedAmbulance: ambulance._id,
+        status: 'DISPATCHED',
+        'timestamps.dispatched': new Date(),
+        'route.distanceKm': distanceKm,
+        'route.etaMinutes': etaMinutes(distanceKm),
+      }),
+      Ambulance.findByIdAndUpdate(ambulance._id, {
+        status: 'DISPATCHED',
+        currentIncident: incidentId,
+      }),
+    ])
 
-      if (io) {
-        io.to(`ambulance_${ambulance._id}`).emit('dispatch_alert', { incidentId, incident })
-        io.to('admin').emit('ambulance_dispatched', { ambulanceId: ambulance._id, incidentId, ambulance })
-        io.to(`incident_${incidentId}`).emit('ambulance_assigned', { incidentId, ambulance })
-        io.to('patient').emit('ambulance_assigned', { incidentId, ambulance })
-      }
+    console.log(`[Dispatch] Unit ${ambulance.vehicleNumber} -> ${fresh.incidentNumber} (${distanceKm ?? '?'}km)`)
+
+    if (io) {
+      const payload = { incidentId, incident: fresh, ambulance, etaMinutes: etaMinutes(distanceKm), distanceKm }
+      io.to(`ambulance_${ambulance._id}`).emit('dispatch_alert', payload)
+      io.to('paramedic').emit('dispatch_alert', payload)
+      io.to('admin').emit('ambulance_dispatched', payload)
+      io.to(`incident_${incidentId}`).emit('ambulance_assigned', payload)
     }
   } catch (err) {
-    console.error('[AI Triage Pipeline Error]:', err)
-    // Guarantee fallback triage
-    await Incident.findByIdAndUpdate(incidentId, {
-      'triageData.esiLevel': 2,
-      'triageData.aiSummary': 'Emergency response units dispatched. Clinical assessment active.',
-      status: 'TRIAGE_COMPLETE',
-    }).catch(() => {})
+    console.error('[Dispatch] Pipeline error:', err)
+    // An incident must never be left silently stuck in PENDING. Fall back to the
+    // deterministic protocol so responders still get a severity to act on.
+    try {
+      const incident = await Incident.findById(incidentId)
+      const fallback = aiService.clinicalRuleTriage(
+        incident?.triageData?.chiefComplaint || incident?.voiceTranscript || '',
+        incident?.triageData?.vitals
+      )
+      await Incident.findByIdAndUpdate(incidentId, {
+        'triageData.esiLevel': fallback.esiLevel,
+        'triageData.aiSummary': fallback.aiSummary,
+        'triageData.aiConfidence': fallback.aiConfidence,
+        'triageData.criticalAlerts': fallback.criticalAlerts,
+        'triageData.recommendedActions': fallback.recommendedActions,
+        'triageData.engine': 'rules-after-error',
+        status: 'TRIAGE_COMPLETE',
+      })
+      if (io) io.to('admin').emit('dispatch_degraded', { incidentId, reason: err.message })
+    } catch (inner) {
+      console.error('[Dispatch] Fallback triage also failed:', inner.message)
+    }
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/incidents - create an emergency incident (PUBLIC)
+// ──────────────────────────────────────────────────────────────────────────────
+// Open to anonymous citizens by design. Supports both reporting branches:
+//   SELF      - the patient is reporting their own emergency
+//   BYSTANDER - someone is reporting for a stranger; patient details are absent
+//               and sceneInfo carries what an untrained caller can actually see.
+router.post('/', optionalAuth, async (req, res, next) => {
+  try {
+    const {
+      location,
+      chiefComplaint,
+      vitals,
+      voiceTranscript,
+      patientDetails,
+      reporterType,
+      reporterContact,
+      sceneInfo,
+    } = req.body
+
+    const coords = location?.coordinates
+    const validCoords =
+      Array.isArray(coords) &&
+      coords.length === 2 &&
+      coords.every((n) => Number.isFinite(Number(n))) &&
+      Math.abs(Number(coords[1])) <= 90 &&
+      Math.abs(Number(coords[0])) <= 180
+
+    if (!validCoords) {
+      return res.status(400).json({
+        message: 'A valid location is required as coordinates [longitude, latitude].',
+      })
+    }
+
+    const isBystander = reporterType === 'BYSTANDER'
+
+    // For a bystander report we must not borrow the reporter's own medical
+    // profile: the patient is a different person entirely.
+    const profile = isBystander ? {} : req.user?.emergencyProfile || {}
+
+    // Build the complaint text triage will reason over, folding in the scene
+    // observations a bystander can give.
+    const complaintParts = [chiefComplaint || voiceTranscript].filter(Boolean)
+    if (sceneInfo?.isConscious === false) complaintParts.push('patient is unconscious')
+    if (sceneInfo?.isBreathing === false) complaintParts.push('patient is not breathing')
+    if (sceneInfo?.victimCount > 1) complaintParts.push(`${sceneInfo.victimCount} people injured`)
+    if (sceneInfo?.hazards?.length) complaintParts.push(`scene hazards: ${sceneInfo.hazards.join(', ')}`)
+    if (sceneInfo?.description) complaintParts.push(sceneInfo.description)
+
+    const complaint = complaintParts.join('; ') || 'Emergency assistance requested'
+
+    // One-time ownership token so an anonymous reporter can follow their own
+    // report without an account.
+    const trackingToken = crypto.randomBytes(24).toString('hex')
+
+    const incident = await Incident.create({
+      patient: req.userId || null,
+      trackingToken,
+      reporterType: isBystander ? 'BYSTANDER' : 'SELF',
+      reporterContact: {
+        name: reporterContact?.name || req.user?.name || (isBystander ? 'Anonymous bystander' : 'Citizen in distress'),
+        phone: reporterContact?.phone || req.user?.phone || null,
+      },
+      sceneInfo: {
+        victimCount: sceneInfo?.victimCount || 1,
+        isConscious: sceneInfo?.isConscious ?? null,
+        isBreathing: sceneInfo?.isBreathing ?? null,
+        hazards: sceneInfo?.hazards || [],
+        description: sceneInfo?.description || '',
+      },
+      patientDetails: {
+        // Unknown is the honest value for a bystander report; inventing a name
+        // or blood group here would be clinically dangerous downstream.
+        name: isBystander ? 'Unidentified patient' : req.user?.name || patientDetails?.name || 'Citizen in distress',
+        age: patientDetails?.age ?? profile.age ?? null,
+        gender: patientDetails?.gender || profile.gender || null,
+        bloodType: isBystander ? null : patientDetails?.bloodType || profile.bloodType || null,
+        allergies: isBystander ? [] : patientDetails?.allergies || profile.allergies || [],
+        conditions: isBystander ? [] : patientDetails?.conditions || profile.conditions || [],
+        phone: isBystander ? null : req.user?.phone || patientDetails?.phone || null,
+      },
+      triageData: {
+        chiefComplaint: complaint,
+        vitals: vitals || null,
+        // Severity is left unset until triage runs, rather than asserting a
+        // provisional ESI the UI would display as though it were assessed.
+        aiSummary: 'Triage in progress.',
+        requiredSpecialties: [],
+      },
+      location: {
+        type: 'Point',
+        coordinates: [Number(coords[0]), Number(coords[1])],
+        address: location.address || 'Location pending reverse geocode',
+      },
+      voiceTranscript: voiceTranscript || '',
+      status: 'PENDING',
+      timestamps: { created: new Date() },
+    })
+
+    const io = req.app.get('io')
+    if (io) {
+      io.to('admin').emit('new_incident', incident)
+      io.to('hospital').emit('new_incident', incident)
+    }
+
+    // Detached: the citizen gets an immediate acknowledgement.
+    runDispatchPipeline(incident._id, io)
+
+    const body = incident.toObject()
+    delete body.trackingToken
+
+    res.status(201).json({
+      incident: body,
+      // Returned exactly once. The client stores this to track or cancel.
+      trackingToken,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/incidents - list incidents (staff only)
+// ──────────────────────────────────────────────────────────────────────────────
+// Staff-only: this returns patient names, phone numbers and clinical detail
+// across the whole city. An anonymous reporter uses GET /:id with their token.
+router.get('/', auth, authorize(...STAFF_ROLES), async (req, res, next) => {
+  try {
+    const { status, limit = 50, page = 1 } = req.query
+    const query = {}
+
+    // Scope each role to what it is responsible for.
+    if (req.user.role === 'paramedic' && req.user.ambulanceId) query.assignedAmbulance = req.user.ambulanceId
+    if (req.user.role === 'hospital_staff' && req.user.hospitalId) query.allocatedHospital = req.user.hospitalId
+    if (status) query.status = status
+
+    const perPage = Math.min(200, Math.max(1, parseInt(limit, 10) || 50))
+    const skip = (Math.max(1, parseInt(page, 10) || 1) - 1) * perPage
+
+    const [incidents, total] = await Promise.all([
+      Incident.find(query)
+        .populate('assignedAmbulance', 'vehicleNumber vehicleType currentLocation status equipment')
+        .populate('allocatedHospital', 'name location queueStatus resources capabilities')
+        .sort({ createdAt: -1 })
+        .limit(perPage)
+        .skip(skip),
+      Incident.countDocuments(query),
+    ])
+
+    res.json({ incidents, total, page: parseInt(page, 10) || 1, limit: perPage })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/incidents/stats/summary - live operational summary
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/stats/summary', optionalAuth, async (req, res, next) => {
+  try {
+    const startOfToday = new Date(new Date().setHours(0, 0, 0, 0))
+
+    const [
+      total,
+      active,
+      completed,
+      today,
+      esiAgg,
+      ambulances,
+      hospitals,
+      responseAgg,
+      surge,
+    ] = await Promise.all([
+      Incident.countDocuments(),
+      Incident.countDocuments({ status: { $in: ACTIVE_STATUSES } }),
+      Incident.countDocuments({ status: 'COMPLETED' }),
+      Incident.countDocuments({ createdAt: { $gte: startOfToday } }),
+      Incident.aggregate([
+        { $match: { status: { $nin: ['COMPLETED', 'CANCELLED'] } } },
+        { $group: { _id: '$triageData.esiLevel', count: { $sum: 1 } } },
+      ]),
+      Ambulance.find({ isActive: true }),
+      Hospital.find({ isActive: true }),
+      // Real mean dispatch latency: created -> dispatched, in seconds.
+      // This replaced a hardcoded avgDelaySeconds: 42.
+      Incident.aggregate([
+        { $match: { 'timestamps.dispatched': { $ne: null }, 'timestamps.created': { $ne: null } } },
+        {
+          $project: {
+            delaySeconds: {
+              $divide: [{ $subtract: ['$timestamps.dispatched', '$timestamps.created'] }, 1000],
+            },
+          },
+        },
+        { $match: { delaySeconds: { $gte: 0, $lt: 86400 } } },
+        { $group: { _id: null, avg: { $avg: '$delaySeconds' }, n: { $sum: 1 } } },
+      ]),
+      aiService.forecastSurge(Incident, 12),
+    ])
+
+    const esiCounts = { esi1: 0, esi2: 0, esi3: 0, esi4: 0, esi5: 0 }
+    for (const row of esiAgg) {
+      if (row._id >= 1 && row._id <= 5) esiCounts[`esi${row._id}`] = row.count
+    }
+
+    const inRouteStatuses = ['DISPATCHED', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL']
+    const fleet = {
+      total: ambulances.length,
+      available: ambulances.filter((a) => a.status === 'AVAILABLE').length,
+      inRoute: ambulances.filter((a) => inRouteStatuses.includes(a.status)).length,
+      maintenance: ambulances.filter((a) => a.status === 'MAINTENANCE').length,
+    }
+
+    // Bed figures summed from real hospital documents, with no invented
+    // defaults standing in for missing data.
+    const beds = hospitals.reduce(
+      (acc, h) => {
+        const r = h.resources || {}
+        acc.icuTotal += r.icuBeds?.total || 0
+        acc.icuAvailable += r.icuBeds?.available || 0
+        acc.traumaTotal += r.traumaBeds?.total || 0
+        acc.traumaAvailable += r.traumaBeds?.available || 0
+        acc.ventilatorsTotal += r.ventilators?.total || 0
+        acc.ventilatorsAvailable += r.ventilators?.available || 0
+        return acc
+      },
+      { icuTotal: 0, icuAvailable: 0, traumaTotal: 0, traumaAvailable: 0, ventilatorsTotal: 0, ventilatorsAvailable: 0 }
+    )
+
+    const bedTotal = beds.icuTotal + beds.traumaTotal
+    const bedAvailable = beds.icuAvailable + beds.traumaAvailable
+    const occupied = Math.max(0, bedTotal - bedAvailable)
+
+    const responseStats = responseAgg[0] || null
+
+    res.json({
+      summary: {
+        total,
+        active,
+        completed,
+        today,
+        esiCounts,
+        fleet,
+        beds: {
+          ...beds,
+          total: bedTotal,
+          available: bedAvailable,
+          occupied,
+          utilizationRate: bedTotal > 0 ? Math.round((occupied / bedTotal) * 100) : null,
+        },
+        // null, not a placeholder number, when nothing has been dispatched yet.
+        avgDispatchSeconds: responseStats ? Math.round(responseStats.avg) : null,
+        avgDispatchSampleSize: responseStats ? responseStats.n : 0,
+        hospitalsOnDiversion: hospitals.filter((h) => h.queueStatus?.diversionStatus).length,
+        surgeForecast: surge.forecast,
+        surgeBasis: surge.basis,
+        surgeEngine: surge.engine,
+      },
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/incidents/:id - single incident
+// ──────────────────────────────────────────────────────────────────────────────
+// Staff and the signed-in patient see the full record. An anonymous reporter
+// presenting the correct tracking token gets a reduced view: enough to follow
+// their ambulance, without any other person's medical detail.
+router.get('/:id', optionalAuth, async (req, res, next) => {
+  try {
+    const token = req.get('x-tracking-token') || req.query.token
+
+    const incident = await Incident.findById(req.params.id)
+      .select('+trackingToken')
+      .populate('assignedAmbulance', 'vehicleNumber vehicleType currentLocation status equipment assignedCrew')
+      .populate('allocatedHospital', 'name location queueStatus resources capabilities contact')
+
+    if (!incident) return res.status(404).json({ message: 'Incident not found' })
+
+    const isStaff = req.user && STAFF_ROLES.includes(req.user.role)
+    const isOwner = req.userId && String(incident.patient) === String(req.userId)
+    const hasToken = Boolean(token) && token === incident.trackingToken
+
+    if (!isStaff && !isOwner && !hasToken) {
+      return res.status(403).json({ message: 'Not authorised to view this incident' })
+    }
+
+    const body = incident.toObject()
+    delete body.trackingToken
+
+    if (isStaff || isOwner) return res.json({ incident: body })
+
+    // Token-only tracking view.
+    res.json({
+      incident: {
+        _id: body._id,
+        incidentNumber: body.incidentNumber,
+        status: body.status,
+        reporterType: body.reporterType,
+        location: body.location,
+        triageData: {
+          esiLevel: body.triageData?.esiLevel,
+          aiSummary: body.triageData?.aiSummary,
+          engine: body.triageData?.engine,
+          recommendedActions: body.triageData?.recommendedActions,
+        },
+        assignedAmbulance: body.assignedAmbulance,
+        allocatedHospital: body.allocatedHospital,
+        route: body.route,
+        timestamps: body.timestamps,
+      },
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PATCH /api/incidents/:id/status - update status, vitals or notes
+// ──────────────────────────────────────────────────────────────────────────────
+// Staff may drive the full workflow. A reporter holding the tracking token may
+// only cancel their own report, so an open endpoint cannot be used to mark
+// other people's emergencies resolved.
+router.patch('/:id/status', optionalAuth, async (req, res, next) => {
+  try {
+    const { status, vitals, notes } = req.body
+    const token = req.get('x-tracking-token') || req.query.token
+
+    const existing = await Incident.findById(req.params.id).select('+trackingToken')
+    if (!existing) return res.status(404).json({ message: 'Incident not found' })
+
+    const isStaff = req.user && STAFF_ROLES.includes(req.user.role)
+    const isOwner = req.userId && String(existing.patient) === String(req.userId)
+    const hasToken = Boolean(token) && token === existing.trackingToken
+
+    if (!isStaff && !isOwner && !hasToken) {
+      return res.status(403).json({ message: 'Not authorised to update this incident' })
+    }
+
+    // Reporters can cancel, and nothing else.
+    if (!isStaff && status && status !== 'CANCELLED') {
+      return res.status(403).json({ message: 'Only emergency staff can change an incident to that status' })
+    }
+    if (!isStaff && (vitals || notes)) {
+      return res.status(403).json({ message: 'Only emergency staff can record vitals or clinical notes' })
+    }
+
+    const update = {}
+    if (status) update.status = status
+    if (notes) update.notes = notes
+    if (vitals) update['triageData.vitals'] = vitals
+
+    const tsMap = {
+      TRIAGE_COMPLETE: 'timestamps.triageCompleted',
+      DISPATCHED: 'timestamps.dispatched',
+      EN_ROUTE_TO_PATIENT: 'timestamps.dispatched',
+      AT_PATIENT: 'timestamps.pickedUp',
+      ARRIVED_AT_HOSPITAL: 'timestamps.arrivedAtHospital',
+      COMPLETED: 'timestamps.completed',
+      CANCELLED: 'timestamps.completed',
+    }
+    if (tsMap[status]) update[tsMap[status]] = new Date()
+
+    const incident = await Incident.findByIdAndUpdate(req.params.id, update, { new: true })
+      .populate('assignedAmbulance')
+      .populate('allocatedHospital')
+
+    // Release the unit once the job ends, so the fleet count stays truthful.
+    if ((status === 'COMPLETED' || status === 'CANCELLED') && incident.assignedAmbulance) {
+      await Ambulance.findByIdAndUpdate(incident.assignedAmbulance._id || incident.assignedAmbulance, {
+        status: 'AVAILABLE',
+        currentIncident: null,
+      })
+    }
+
+    // Re-triage when a paramedic records real vitals: measured observations can
+    // escalate a case the initial phone description understated.
+    if (vitals && isStaff) {
+      const retriage = await aiService.triageIncident({
+        chiefComplaint: incident.triageData?.chiefComplaint,
+        vitals,
+        age: incident.patientDetails?.age,
+        gender: incident.patientDetails?.gender,
+        reporterType: incident.reporterType,
+      })
+      if (retriage.esiLevel < (incident.triageData?.esiLevel || 5)) {
+        await Incident.findByIdAndUpdate(req.params.id, {
+          'triageData.esiLevel': retriage.esiLevel,
+          'triageData.aiSummary': retriage.aiSummary,
+          'triageData.criticalAlerts': retriage.criticalAlerts,
+          'triageData.engine': retriage.engine,
+        })
+        const io = req.app.get('io')
+        if (io) {
+          io.to('hospital').emit('triage_escalated', {
+            incidentId: incident._id,
+            esiLevel: retriage.esiLevel,
+            reason: retriage.aiSummary,
+            engine: retriage.engine,
+          })
+        }
+      }
+    }
+
+    const io = req.app.get('io')
+    if (io) {
+      const payload = { incidentId: incident._id, status, incident }
+      for (const room of [`incident_${incident._id}`, 'hospital', 'admin']) {
+        io.to(room).emit('incident_status', payload)
+      }
+      if (incident.assignedAmbulance) {
+        io.to(`ambulance_${incident.assignedAmbulance._id || incident.assignedAmbulance}`).emit('incident_status', payload)
+      }
+    }
+
+    res.json({ incident })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/incidents/:id/allocate - re-run hospital allocation (staff only)
+// ──────────────────────────────────────────────────────────────────────────────
+router.post('/:id/allocate', auth, authorize(...STAFF_ROLES), async (req, res, next) => {
+  try {
+    const incident = await Incident.findById(req.params.id)
+    if (!incident) return res.status(404).json({ message: 'Incident not found' })
+
+    const { ranked, top, engine } = await allocateHospital(incident)
+    if (!top) return res.status(404).json({ message: 'No active hospitals available for allocation' })
+
+    const io = req.app.get('io')
+    if (io) {
+      io.to(`incident_${incident._id}`).emit('hospital_allocated', { incidentId: incident._id, allocatedHospital: top })
+      io.to('hospital').emit('incoming_patient', { incidentId: incident._id, incident, allocatedHospital: top })
+      io.to('admin').emit('hospital_allocated', { incidentId: incident._id, allocatedHospital: top })
+    }
+
+    res.json({ rankedHospitals: ranked, allocatedHospital: top, engine })
+  } catch (err) {
+    next(err)
+  }
+})
 
 module.exports = router

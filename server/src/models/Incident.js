@@ -4,6 +4,14 @@ const incidentSchema = new mongoose.Schema(
   {
     incidentNumber: { type: String, unique: true },
     patient: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
+    /**
+     * Opaque ownership token for anonymous reports. Returned to the reporter
+     * exactly once at creation and held in their browser, it lets a citizen with
+     * no account track or cancel their own report without granting access to
+     * anyone else's. Never included in list responses.
+     */
+    trackingToken: { type: String, index: true, select: false },
     patientDetails: {
       name: String,
       age: Number,
@@ -13,12 +21,53 @@ const incidentSchema = new mongoose.Schema(
       conditions: [String],
       phone: String,
     },
+    /**
+     * Who raised this call. Both paths are open to anonymous citizens: SELF is
+     * the patient reporting their own emergency, BYSTANDER is someone reporting
+     * on behalf of a stranger, where patient details are second-hand or absent.
+     * Triage weights a BYSTANDER report toward the more severe interpretation.
+     */
+    reporterType: { type: String, enum: ['SELF', 'BYSTANDER'], default: 'SELF' },
+
+    /**
+     * Callback details for an anonymous reporter. Kept separate from
+     * patientDetails because for a BYSTANDER report these describe a different
+     * person from the patient, and dispatch needs to reach the caller at scene.
+     */
+    reporterContact: {
+      name: String,
+      phone: String,
+    },
+
+    /**
+     * Scene observations a bystander can answer without medical knowledge.
+     * These feed triage directly and are far more reliable than asking an
+     * untrained caller for a blood group or a GCS score.
+     */
+    sceneInfo: {
+      victimCount: { type: Number, min: 1, default: 1 },
+      isConscious: { type: Boolean, default: null },
+      isBreathing: { type: Boolean, default: null },
+      hazards: [String], // e.g. 'TRAFFIC', 'FIRE', 'WATER', 'ELECTRICAL'
+      description: String,
+    },
+
     triageData: {
       esiLevel: { type: Number, min: 1, max: 5 },
       chiefComplaint: String,
       aiConfidence: { type: Number, min: 0, max: 1 },
       aiSummary: String,
       requiredSpecialties: [String],
+      // Previously written by the triage pipeline but absent from this schema,
+      // so Mongoose strict mode silently discarded them and the UI could never
+      // display them. Declared here so clinical alerts actually persist.
+      criticalAlerts: [String],
+      recommendedActions: [String],
+      // Names what produced this triage: a model id such as
+      // 'groq:openai/gpt-oss-120b', or 'rules' for the deterministic fallback.
+      // The UI must not present a 'rules' result as an AI assessment.
+      engine: String,
+      triagedAt: Date,
       vitals: {
         heartRate: Number,
         spO2: Number,
