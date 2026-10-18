@@ -95,8 +95,10 @@ router.post('/', auth, authorize('admin'), async (req, res, next) => {
   }
 })
 
-// PATCH /api/ambulances/:id/location — Update GPS location (paramedic/admin)
-router.patch('/:id/location', optionalAuth, async (req, res, next) => {
+// PATCH /api/ambulances/:id/location — Update GPS telemetry
+// Staff-only: this is the position the patient tracking map and the command
+// centre both trust. Anyone able to write it could spoof a unit's location.
+router.patch('/:id/location', auth, authorize('paramedic', 'admin'), async (req, res, next) => {
   try {
     const { coordinates, heading, speed } = req.body
 
@@ -133,7 +135,8 @@ router.patch('/:id/location', optionalAuth, async (req, res, next) => {
 })
 
 // PATCH /api/ambulances/:id/status — Update status
-router.patch('/:id/status', optionalAuth, async (req, res, next) => {
+// Staff-only: status decides which units are dispatchable.
+router.patch('/:id/status', auth, authorize('paramedic', 'admin'), async (req, res, next) => {
   try {
     const { status, currentIncident } = req.body
     const update = { status }
@@ -154,8 +157,9 @@ router.patch('/:id/status', optionalAuth, async (req, res, next) => {
   }
 })
 
-// POST /api/ambulances/seed — Seed sample ambulances (dev)
-router.post('/seed', optionalAuth, async (req, res, next) => {
+// POST /api/ambulances/seed — Seed sample ambulances
+// Admin-only and destructive: deletes the whole fleet before inserting.
+router.post('/seed', auth, authorize('admin'), async (req, res, next) => {
   try {
     const samples = [
       {

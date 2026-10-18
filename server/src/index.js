@@ -32,20 +32,69 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
-      callback(null, true)
-    } else {
-      callback(null, true)
-    }
+    // Vercel gives every preview deployment its own subdomain, so those are
+    // matched by suffix rather than listed. Requests with no Origin header
+    // (curl, server-to-server, health probes) are allowed through.
+    const allowed =
+      !origin ||
+      allowedOrigins.includes(origin) ||
+      /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)
+
+    // Both branches previously returned callback(null, true), which allowed
+    // every origin on the internet and made the allowlist decorative.
+    if (allowed) return callback(null, true)
+
+    console.warn(`[CORS] Blocked origin: ${origin}`)
+    return callback(null, false)
   },
   credentials: true,
 }))
+
+// Security headers. helmet was imported but never mounted.
+// crossOriginEmbedderPolicy is disabled because Mapbox GL loads cross-origin
+// workers and tiles, which COEP would block.
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false,
+}))
+
 app.use(morgan('dev'))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
 
-// Rate limiting
+// ── Rate limiting ────────────────────────────────────────────────────────────
+// Render terminates TLS upstream, so the client IP arrives in X-Forwarded-For.
+// Without this, express-rate-limit sees one proxy IP and limits all users as one.
+app.set('trust proxy', 1)
+
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 20 }))
+
+// Speech-to-text is the most expensive endpoint per call and is open to
+// anonymous citizens, so it gets its own tighter bucket.
+app.use('/api/ai/transcribe', rateLimit({ windowMs: 10 * 60 * 1000, max: 15 }))
+app.use('/api/ai/voice-triage', rateLimit({ windowMs: 10 * 60 * 1000, max: 15 }))
+
+/**
+ * Emergency reporting is deliberately public, which means it needs abuse
+ * protection — but throttling a genuine emergency is far worse than absorbing
+ * some junk. The ceiling is therefore set well above plausible real use (a
+ * person reporting one incident, retrying a few times on a bad connection)
+ * and only applies to creation, never to tracking an existing report.
+ */
+const sosLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: {
+    message:
+      'Too many emergency reports from this connection. If this is a real emergency, call 108 immediately.',
+  },
+})
+
+app.use('/api/incidents', (req, res, next) => {
+  if (req.method !== 'POST') return next()
+  return sosLimiter(req, res, next)
+})
+
 app.use('/api', rateLimit({ windowMs: 1 * 60 * 1000, max: 200 }))
 
 // Routes

@@ -69,8 +69,10 @@ router.post('/', auth, authorize('admin'), async (req, res, next) => {
   }
 })
 
-// PATCH /api/hospitals/:id/resources — Update bed/resource counts (hospital staff/admin)
-router.patch('/:id/resources', optionalAuth, async (req, res, next) => {
+// PATCH /api/hospitals/:id/resources — Update bed/resource counts
+// Staff-only: bed availability drives live ambulance allocation across the city,
+// so an unauthenticated writer here could redirect real dispatches.
+router.patch('/:id/resources', auth, authorize('hospital_staff', 'admin'), async (req, res, next) => {
   try {
     const { resources, queueStatus } = req.body
     const update = { lastUpdated: new Date() }
@@ -94,7 +96,8 @@ router.patch('/:id/resources', optionalAuth, async (req, res, next) => {
 })
 
 // PATCH /api/hospitals/:id/diversion — Toggle diversion status
-router.patch('/:id/diversion', optionalAuth, async (req, res, next) => {
+// Staff-only: diverting a hospital removes it from allocation city-wide.
+router.patch('/:id/diversion', auth, authorize('hospital_staff', 'admin'), async (req, res, next) => {
   try {
     const { diversionStatus } = req.body
     const hospital = await Hospital.findByIdAndUpdate(
@@ -118,7 +121,10 @@ router.patch('/:id/diversion', optionalAuth, async (req, res, next) => {
 })
 
 // POST /api/hospitals/seed — Seed sample Mumbai hospitals
-router.post('/seed', optionalAuth, async (req, res, next) => {
+// Admin-only and destructive: this deletes every hospital before inserting.
+// It was previously reachable unauthenticated, meaning any caller on the
+// internet could empty the collection.
+router.post('/seed', auth, authorize('admin'), async (req, res, next) => {
   try {
     const sampleHospitals = [
       {
