@@ -1,12 +1,50 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
+import { ResponsiveContainer, LineChart, Line } from 'recharts'
 import { getSocket } from '../lib/socket'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
-import { PARAMEDIC_REAL_ROUTE } from '../lib/routing'
+
+const TRAUMA_CHECKLIST_TEMPLATE = [
+  { id: 'scene_safety', category: 'Scene Safety', label: 'Scene confirmed safe to approach' },
+  { id: 'airway', category: 'Airway', label: 'Airway patent / secured' },
+  { id: 'breathing', category: 'Breathing', label: 'Breathing assessed — adequate rate & effort' },
+  { id: 'circulation', category: 'Circulation', label: 'Bleeding controlled, pulses checked' },
+  { id: 'vitals', category: 'Vitals', label: 'Baseline vitals recorded & monitored' },
+  { id: 'iv_meds', category: 'IV / Medication', label: 'IV access established, medications ready' },
+  { id: 'equipment', category: 'Trauma Equipment', label: 'C-collar, splints, O2 prepared' },
+  { id: 'hospital_notified', category: 'Handoff', label: 'Receiving hospital notified' },
+]
+
+function maneuverIcon(type, modifier) {
+  if (type === 'arrive') return '🏁'
+  if (type === 'depart') return '🚦'
+  if (modifier?.includes('left')) return '↰'
+  if (modifier?.includes('right')) return '↱'
+  if (modifier === 'straight') return '↑'
+  if (modifier?.includes('uturn')) return '↩'
+  return '➜'
+}
+
+function describeManeuver(step) {
+  if (!step) return null
+  const type = step.maneuver?.type || 'continue'
+  const modifier = step.maneuver?.modifier
+  const road = step.name || 'the road ahead'
+  const verb =
+    type === 'arrive' ? 'Arrive at destination'
+    : type === 'depart' ? `Head out on ${road}`
+    : modifier ? `${modifier[0].toUpperCase()}${modifier.slice(1)} onto ${road}`
+    : `Continue on ${road}`
+  return {
+    text: verb,
+    distance: step.distance ? Math.round(step.distance) : null,
+    icon: maneuverIcon(type, modifier),
+  }
+}
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
@@ -18,15 +56,18 @@ export default function ParamedicPortal() {
 
   // Live Clock State
   const [currentTime, setCurrentTime] = useState('20:24')
-  const [currentDate, setCurrentDate] = useState('Thu, 19 Sep 2026')
+  const [currentDate, setCurrentDate] = useState('')
 
   // Map & Navigation State
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
   const [mapMode, setMapMode] = useState('3D') // '3D' | '2D'
-  const [etaMinutes, setEtaMinutes] = useState('05:40')
-  const [distanceKm, setDistanceKm] = useState('2.4')
-  const [ambulanceSpeed, setAmbulanceSpeed] = useState(76)
+  const [distanceKm, setDistanceKm] = useState('—')
+
+  // Live route data (real OSRM geometry/steps via existing /api/ai/route) + ETA countdown
+  const [routeData, setRouteData] = useState(null) // { etaMinutes, distanceKm, steps }
+  const [etaSecondsLeft, setEtaSecondsLeft] = useState(null) // null = no ETA known yet
+  const [currentStepIdx, setCurrentStepIdx] = useState(0)
 
   // Real Backend Data State
   const [activeAmbulance, setActiveAmbulance] = useState(null)
@@ -40,27 +81,37 @@ export default function ParamedicPortal() {
     spO2: 92,
     gcs: 13,
   })
+  const [vitalsSource, setVitalsSource] = useState('demo')
+
+  // Demo/sample baseline only; no monitor integration is connected.
+  const [vitalsHistory, setVitalsHistory] = useState(() => [
+    { t: 0, heartRate: 118, spO2: 92, bpSystolic: 85 },
+  ])
 
   const [activeChecklist, setActiveChecklist] = useState([
-    { id: 1, text: "Administer 500 mL IV crystalloid bolus (Ringer's Lactate)", done: true },
-    { id: 2, text: 'Apply high-flow oxygen via non-rebreather mask (15 L/min)', done: true },
+    { id: 1, text: "Administer 500 mL IV crystalloid bolus (Ringer's Lactate)", done: false },
+    { id: 2, text: 'Apply high-flow oxygen via non-rebreather mask (15 L/min)', done: false },
     { id: 3, text: 'Control hemorrhage, apply tourniquet if extremity bleeding persists', done: false },
     { id: 4, text: 'Notify trauma bay for priority surgical handoff', done: false },
   ])
 
+  // Pre-Arrival Trauma Checklist — a workflow checklist, not medical advice.
+  // Persisted per-incident (or per-session if no active incident yet).
+  const [traumaChecklist, setTraumaChecklist] = useState(() =>
+    TRAUMA_CHECKLIST_TEMPLATE.map((item) => ({ ...item, done: false }))
+  )
+
   // Dispatch & Workflow Status
-  const [dispatchStatus, setDispatchStatus] = useState('EN_ROUTE_TO_HOSPITAL') // 'DISPATCHED' | 'AT_PATIENT' | 'EN_ROUTE_TO_HOSPITAL' | 'COMPLETED'
+  const [dispatchStatus, setDispatchStatus] = useState('PENDING')
   const [isRecordingVoice, setIsRecordingVoice] = useState(false)
-  const [voiceNotes, setVoiceNotes] = useState([
-    'Patient has blunt abdominal trauma with suspected splenic laceration. IV access secured at left antecubital fossa.',
-  ])
+  const [voiceNotes, setVoiceNotes] = useState([])
 
   // Digital Clock
   useEffect(() => {
     const updateTime = () => {
       const now = new Date()
       setCurrentTime(now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }))
-      setCurrentDate('Thu, 19 Sep 2026')
+      setCurrentDate(now.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }))
     }
     updateTime()
     const timer = setInterval(updateTime, 1000)
@@ -92,6 +143,9 @@ export default function ParamedicPortal() {
           setDispatchStatus(active.status)
           if (active.triageData?.vitals) {
             setPatientVitals((v) => ({ ...v, ...active.triageData.vitals }))
+            setVitalsSource('incident')
+          } else {
+            setVitalsSource('demo')
           }
         }
       } catch (err) {
@@ -130,26 +184,116 @@ export default function ParamedicPortal() {
     }
   }, [activeIncident?._id])
 
-  // Vital Signs Micro-fluctuation
+  // Route estimate from the last reported vehicle location to the current
+  // incident destination. No browser GPS feed is connected, so this is not live navigation.
   useEffect(() => {
-    const interval = setInterval(() => {
-      setPatientVitals((prev) => ({
-        ...prev,
-        heartRate: Math.max(110, Math.min(126, prev.heartRate + (Math.floor(Math.random() * 5) - 2))),
-        spO2: Math.max(90, Math.min(95, prev.spO2 + (Math.floor(Math.random() * 3) - 1))),
-      }))
-    }, 3500)
-    return () => clearInterval(interval)
-  }, [])
+    const hospitalDestination = activeIncident?.allocatedHospital?.location?.coordinates
+    const sceneDestination = activeIncident?.location?.coordinates
+    const destination = dispatchStatus === 'EN_ROUTE_TO_HOSPITAL' ? hospitalDestination : sceneDestination
+    const origin = activeAmbulance?.currentLocation?.coordinates
+    const validPoint = (point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite) && !(point[0] === 0 && point[1] === 0)
+    if (!validPoint(origin) || !validPoint(destination)) {
+      setRouteData(null)
+      setEtaSecondsLeft(null)
+      setDistanceKm('—')
+      return
+    }
+
+    let cancelled = false
+    api
+      .post('/ai/route', { origin, destination })
+      .then((res) => {
+        if (cancelled || !res.data) return
+        setRouteData(res.data)
+        setDistanceKm(String(res.data.distanceKm))
+        setCurrentStepIdx(0)
+      })
+      .catch((err) => {
+        console.warn('Route estimate unavailable:', err.message)
+        if (!cancelled) {
+          setRouteData(null)
+          setEtaSecondsLeft(null)
+          setDistanceKm('—')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeAmbulance?.currentLocation?.updatedAt, activeIncident?._id, activeIncident?.status, dispatchStatus])
+
+  // ETA countdown — seeded from real route data (or the incident's own
+  // route.etaMinutes if the backend already computed one), ticks down every
+  // second, never goes negative, and shows an "Arrived" state on completion.
+  useEffect(() => {
+    const sourceMinutes = routeData?.etaMinutes ?? activeIncident?.route?.etaMinutes
+    if (sourceMinutes == null) return
+    setEtaSecondsLeft(Math.round(sourceMinutes * 60))
+  }, [routeData?.etaMinutes, activeIncident?.route?.etaMinutes])
+
+  useEffect(() => {
+    if (etaSecondsLeft === null) return
+    if (['AT_PATIENT', 'ARRIVED_AT_HOSPITAL', 'COMPLETED', 'CANCELLED'].includes(dispatchStatus)) return
+    const timer = setInterval(() => {
+      setEtaSecondsLeft((s) => (s === null ? null : Math.max(0, s - 1)))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [etaSecondsLeft === null, dispatchStatus])
+
+  const etaDisplay = useMemo(() => {
+    if (dispatchStatus === 'AT_PATIENT') return 'At scene'
+    if (['ARRIVED_AT_HOSPITAL', 'COMPLETED'].includes(dispatchStatus)) return 'Arrived'
+    if (etaSecondsLeft === null) return '—:—'
+    if (etaSecondsLeft === 0) return 'Arriving'
+    const m = Math.floor(etaSecondsLeft / 60)
+    const s = etaSecondsLeft % 60
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }, [etaSecondsLeft, dispatchStatus])
+
+  // Persist the Pre-Arrival Trauma Checklist per-incident (falls back to a
+  // shared session key when there's no active incident yet).
+  const checklistStorageKey = `mediroute-trauma-checklist-${activeIncident?._id || 'session'}`
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(checklistStorageKey)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        setTraumaChecklist(TRAUMA_CHECKLIST_TEMPLATE.map((item) => ({ ...item, done: !!parsed[item.id] })))
+      } else {
+        setTraumaChecklist(TRAUMA_CHECKLIST_TEMPLATE.map((item) => ({ ...item, done: false })))
+      }
+    } catch {
+      toast.error('Checklist could not be loaded from this device.')
+    }
+  }, [checklistStorageKey])
+
+  const toggleTraumaChecklistItem = (id) => {
+    setTraumaChecklist((prev) => {
+      const next = prev.map((item) => (item.id === id ? { ...item, done: !item.done } : item))
+      try {
+        const toSave = Object.fromEntries(next.map((item) => [item.id, item.done]))
+        localStorage.setItem(checklistStorageKey, JSON.stringify(toSave))
+      } catch {
+        toast.error('Checklist changed for this session but could not be saved on this device.')
+      }
+      return next
+    })
+  }
 
   // Live Mapbox Initialization
   useEffect(() => {
     if (paramedicTab !== 'nav' || !mapRef.current || mapInstanceRef.current) return
 
+    const vehiclePosition = activeAmbulance?.currentLocation?.coordinates
+    const hasVehiclePosition = Array.isArray(vehiclePosition) && vehiclePosition.length === 2 &&
+      vehiclePosition.every(Number.isFinite) && vehiclePosition[0] >= -180 && vehiclePosition[0] <= 180 &&
+      vehiclePosition[1] >= -90 && vehiclePosition[1] <= 90 && !(vehiclePosition[0] === 0 && vehiclePosition[1] === 0)
+    if (!hasVehiclePosition) return
+
     const map = new mapboxgl.Map({
       container: mapRef.current,
       style: 'mapbox://styles/mapbox/dark-v11',
-      center: [72.838, 19.042],
+      center: vehiclePosition,
       zoom: 13.6,
       pitch: 58,
       bearing: -25,
@@ -214,51 +358,21 @@ export default function ParamedicPortal() {
         console.warn('Traffic error:', e)
       }
 
-      // Real Green Corridor GeoJSON Line
-      const routeCoords = PARAMEDIC_REAL_ROUTE?.coordinates || [
-        [72.822, 19.038],
-        [72.828, 19.041],
-        [72.836, 19.045],
-        [72.842, 19.05],
-      ]
-
-      if (!map.getSource('paramedic-corridor')) {
-        map.addSource('paramedic-corridor', {
+      const routeCoordinates = routeData?.geometry?.coordinates
+      if (Array.isArray(routeCoordinates) && routeCoordinates.length > 1) {
+        map.addSource('paramedic-route', {
           type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: routeCoords,
-            },
-          },
+          data: { type: 'Feature', geometry: routeData.geometry, properties: {} },
         })
-
         map.addLayer({
-          id: 'corridor-glow',
+          id: 'paramedic-route-line',
           type: 'line',
-          source: 'paramedic-corridor',
-          paint: {
-            'line-color': '#00F5FF',
-            'line-width': 10,
-            'line-opacity': 0.45,
-            'line-blur': 4,
-          },
-        })
-
-        map.addLayer({
-          id: 'corridor-core',
-          type: 'line',
-          source: 'paramedic-corridor',
-          paint: {
-            'line-color': '#00F5FF',
-            'line-width': 3.5,
-            'line-opacity': 0.95,
-          },
+          source: 'paramedic-route',
+          paint: { 'line-color': '#00F5FF', 'line-width': 4, 'line-opacity': 0.9 },
         })
       }
 
-      // Ambulance Position Marker
+      // Mark the vehicle's last reported position, never a demo coordinate.
       const ambEl = document.createElement('div')
       ambEl.innerHTML = `
         <div class="relative flex items-center justify-center">
@@ -269,20 +383,9 @@ export default function ParamedicPortal() {
         </div>
       `
       new mapboxgl.Marker({ element: ambEl, anchor: 'center' })
-        .setLngLat(routeCoords[0])
+        .setLngLat(vehiclePosition)
         .addTo(map)
 
-      // Destination Hospital Marker
-      const hospEl = document.createElement('div')
-      hospEl.innerHTML = `
-        <div class="px-3 py-1.5 rounded-lg bg-[#7C3AED] border-2 border-[#A855F7] text-white font-mono font-bold text-xs shadow-[0_0_25px_rgba(168,85,247,0.9)] flex items-center gap-1.5">
-          <span>🏥</span>
-          <span>${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}</span>
-        </div>
-      `
-      new mapboxgl.Marker({ element: hospEl, anchor: 'bottom' })
-        .setLngLat(routeCoords[routeCoords.length - 1])
-        .addTo(map)
     })
 
     mapInstanceRef.current = map
@@ -291,7 +394,7 @@ export default function ParamedicPortal() {
       map.remove()
       mapInstanceRef.current = null
     }
-  }, [paramedicTab, activeIncident?.allocatedHospital?.name])
+  }, [paramedicTab, activeAmbulance?.currentLocation?.coordinates?.[0], activeAmbulance?.currentLocation?.coordinates?.[1], routeData?.geometry])
 
   // Camera Controls
   const toggle3D = (mode) => {
@@ -307,74 +410,155 @@ export default function ParamedicPortal() {
 
   const recenter = () => {
     if (!mapInstanceRef.current) return
-    mapInstanceRef.current.flyTo({ center: [72.838, 19.042], zoom: 14, pitch: 58, duration: 1000 })
-    toast('Navigation recentered on vehicle', { icon: '📍' })
+    const position = activeAmbulance?.currentLocation?.coordinates
+    if (!Array.isArray(position) || position.length !== 2 || !position.every(Number.isFinite) || position.every((value) => value === 0)) {
+      toast.error('No vehicle GPS position is available to recenter the map.')
+      return
+    }
+    mapInstanceRef.current.flyTo({ center: position, zoom: 14, pitch: 58, duration: 1000 })
+    toast('Map centered on the last reported vehicle location.', { icon: '📍' })
   }
 
   // Action: Transmit Vitals
   const transmitVitals = async () => {
+    if (!activeIncident?._id) {
+      toast.error('No active incident is linked. Vitals were not shared.')
+      return
+    }
+    if (vitalsSource === 'demo') {
+      toast.error('These are demo values. Load incident vitals or adjust them as manual measurements before sharing.')
+      return
+    }
     try {
-      if (activeIncident?._id) {
-        await api.patch(`/incidents/${activeIncident._id}/status`, { vitals: patientVitals })
-      }
+      await api.patch(`/incidents/${activeIncident._id}/status`, { vitals: patientVitals })
       const socket = getSocket()
-      if (socket) {
-        socket.emit('vitals_update', {
-          incidentId: activeIncident?._id || 'INC-LIVE',
-          vitals: patientVitals,
-        })
+      if (!socket?.connected) {
+        toast.success('Vitals saved to the incident. Live delivery to connected listeners is unconfirmed.')
+        return
       }
-      toast.success(`Live vitals telemetry synchronized with ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`)
-    } catch {
-      toast.success('Live vitals synchronized with ER!')
+      socket.timeout(3000).emit('vitals_update', { incidentId: activeIncident._id, vitals: patientVitals }, (err, result) => {
+        if (err || !result?.success) toast.error(`Vitals saved, but live delivery was not confirmed: ${result?.message || 'connection timed out'}`)
+        else toast.success('Vitals saved and delivered to connected incident listeners.')
+      })
+    } catch (err) {
+      toast.error(`Vitals were not saved or shared: ${err.response?.data?.message || err.message}`)
     }
   }
 
-  // Action: Voice Log with Whisper STT
+  // Voice notes are added locally only after the server confirms transcription
+  // and persistence; failures never create a placeholder transcript.
+  const logVoiceNote = (text) => setVoiceNotes((prev) => [`[${currentTime}] ${text}`, ...prev])
+
   const handleVoiceLog = () => {
-    if (!isRecordingVoice) {
-      setIsRecordingVoice(true)
-      toast('Listening to paramedic voice log via Whisper...', { icon: '🎙️' })
-      setTimeout(async () => {
-        setIsRecordingVoice(false)
-        const newNote = `[${currentTime}] IV bolus infused. Patient vitals stabilized. Direct handoff ready.`
-        setVoiceNotes((prev) => [newNote, ...prev])
-        if (activeIncident?._id) {
-          await api.patch(`/incidents/${activeIncident._id}/status`, { notes: newNote }).catch(() => {})
-        }
-        toast.success('Whisper STT: Voice note transcribed & synced to medical chart!')
-      }, 3000)
+    if (isRecordingVoice) return
+    setIsRecordingVoice(true)
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setIsRecordingVoice(false)
+      toast.error('Microphone recording is unavailable in this browser. No note was created.')
+      return
     }
+
+    toast('Recording a short note for Groq Whisper…', { icon: '🎙️' })
+
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((stream) => {
+        const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) => window.MediaRecorder.isTypeSupported?.(type)) || ''
+        if (!mimeType) {
+          stream.getTracks().forEach((t) => t.stop())
+          setIsRecordingVoice(false)
+          toast.error('This browser does not support an accepted recording format. No note was created.')
+          return
+        }
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+        const chunks = []
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunks.push(e.data)
+        }
+
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop())
+          try {
+            const blob = new Blob(chunks, { type: mimeType })
+            if (!blob.size || blob.size > 7 * 1024 * 1024) throw new Error('Recording is empty or larger than 7 MB.')
+            const base64 = await new Promise((resolve, reject) => {
+              const reader = new FileReader()
+              reader.onloadend = () => resolve(String(reader.result).split(',')[1])
+              reader.onerror = reject
+              reader.readAsDataURL(blob)
+            })
+
+            if (!activeIncident?._id) throw new Error('No active incident is linked; the transcript was not saved.')
+            const res = await api.post('/ai/whisper-transcribe', {
+              audioBase64: base64,
+              mimeType: blob.type,
+              durationSeconds: 5,
+              incidentId: activeIncident?._id,
+            })
+
+            const transcript = res.data?.text?.trim()
+            if (!transcript) throw new Error('No speech was detected; no transcript was saved.')
+            logVoiceNote(transcript)
+            toast.success('Groq Whisper transcript saved to the incident notes.')
+          } catch (err) {
+            console.warn('Whisper transcription unavailable:', err.message)
+            toast.error(`Transcript was not saved: ${err.response?.data?.message || err.message}`)
+          } finally {
+            setIsRecordingVoice(false)
+          }
+        }
+
+        recorder.start()
+        setTimeout(() => {
+          if (recorder.state !== 'inactive') recorder.stop()
+        }, 5000)
+      })
+      .catch((err) => {
+        console.warn('Microphone access denied/unavailable:', err.message)
+        setIsRecordingVoice(false)
+        toast.error(`Microphone access failed: ${err.message}. No note was created.`)
+      })
   }
 
   // Action: Arrived at Patient
   const handleArrived = async () => {
-    setDispatchStatus('AT_PATIENT')
-    if (activeIncident?._id) {
-      await api.patch(`/incidents/${activeIncident._id}/status`, { status: 'AT_PATIENT' }).catch(() => {})
+    if (!activeIncident?._id) return toast.error('No active incident. Arrival status was not saved.')
+    try {
+      await api.patch(`/incidents/${activeIncident._id}/status`, { status: 'AT_PATIENT' })
+      setDispatchStatus('AT_PATIENT')
+      toast.success('Arrival status saved to the incident.')
+    } catch (err) {
+      toast.error(`Arrival status was not saved: ${err.response?.data?.message || err.message}`)
     }
-    const socket = getSocket()
-    if (socket && activeIncident?._id) {
-      socket.emit('incident_status', { incidentId: activeIncident._id, status: 'AT_PATIENT' })
+  }
+
+  const handleEnRouteToHospital = async () => {
+    if (!activeIncident?._id) return toast.error('No active incident. Route status was not saved.')
+    try {
+      await api.patch(`/incidents/${activeIncident._id}/status`, { status: 'EN_ROUTE_TO_HOSPITAL' })
+      setDispatchStatus('EN_ROUTE_TO_HOSPITAL')
+    } catch (err) {
+      toast.error(`Could not save route status: ${err.response?.data?.message || err.message}`)
     }
-    toast.success('Status updated: Arrived at Patient (Care timeline active)')
   }
 
   // Action: Handed over to ER
   const handleHandedOver = async () => {
-    setDispatchStatus('COMPLETED')
-    if (activeIncident?._id) {
-      await api.patch(`/incidents/${activeIncident._id}/status`, { status: 'COMPLETED' }).catch(() => {})
+    if (!activeIncident?._id) return toast.error('No active incident. Handoff status was not saved.')
+    try {
+      await api.patch(`/incidents/${activeIncident._id}/status`, { status: 'COMPLETED' })
+      setDispatchStatus('COMPLETED')
+      toast.success(`Handoff status saved for ${activeIncident?.allocatedHospital?.name || 'the assigned hospital'}.`)
+    } catch (err) {
+      toast.error(`Handoff status was not saved: ${err.response?.data?.message || err.message}`)
     }
-    const socket = getSocket()
-    if (socket && activeIncident?._id) {
-      socket.emit('incident_status', { incidentId: activeIncident._id, status: 'COMPLETED' })
-    }
-    toast.success(`Incident completed: Patient successfully handed to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Team'}!`)
   }
 
   // Vitals Increment / Decrement
   const adjustVital = (key, delta) => {
+    setVitalsSource('manual')
     setPatientVitals((prev) => ({
       ...prev,
       [key]: Math.max(0, prev[key] + delta),
@@ -403,7 +587,7 @@ export default function ParamedicPortal() {
           <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full border border-emerald-500/20 bg-emerald-950/20 text-emerald-400 text-[11px] font-mono">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]" />
             <span>Online</span>
-            <span className="text-white/30 text-[9px]">· 5G Satellite Telemetry</span>
+                <span className="text-white/30 text-[9px]">· Demo session</span>
           </div>
         </div>
 
@@ -419,9 +603,9 @@ export default function ParamedicPortal() {
           <div className="flex items-center gap-2 px-3 py-1 rounded-lg border border-cyan-500/30 bg-cyan-950/20 text-cyan-300 font-semibold text-xs">
             <span className="text-sm">🚑</span>
             <div>
-              <div>{activeAmbulance?.vehicleNumber || 'MH-AMB-002'}</div>
+              <div>{activeAmbulance?.vehicleNumber || 'Unit unassigned'}</div>
               <div className="text-[8px] text-cyan-400/60 leading-none hidden sm:block">
-                {activeAmbulance?.vehicleType?.replace(/_/g, ' ') || 'ADVANCED LIFE SUPPORT'}
+                {activeAmbulance?.vehicleType?.replace(/_/g, ' ') || 'No unit assignment'}
               </div>
             </div>
           </div>
@@ -490,7 +674,7 @@ export default function ParamedicPortal() {
 
         <div className="hidden sm:flex items-center gap-2 text-[11px] text-emerald-400 font-mono">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>Green Wave Signals Synchronized</span>
+          <span>Traffic signal integration unavailable</span>
         </div>
       </nav>
 
@@ -500,7 +684,7 @@ export default function ParamedicPortal() {
         <div className="lg:col-span-5 p-3.5 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600/30 to-blue-600/30 border border-purple-500/40 flex flex-col items-center justify-center text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.3)] shrink-0">
             <span className="text-xl">🏥</span>
-            <span className="text-[8px] font-mono font-bold mt-0.5 uppercase tracking-wider">LEVEL 1</span>
+            <span className="text-[8px] font-mono font-bold mt-0.5 uppercase tracking-wider">ESI {activeIncident?.triageData?.esiLevel ?? '—'}</span>
           </div>
 
           <div className="flex-1 min-w-0 text-left">
@@ -508,21 +692,22 @@ export default function ParamedicPortal() {
               DESTINATION FACILITY
             </div>
             <div className="text-base font-extrabold text-white leading-tight truncate">
-              {activeIncident?.allocatedHospital?.name || 'Lilavati Hospital & Research Centre'}{' '}
-              <span className="text-cyan-400 font-normal">— Bay 01</span>
+              {activeIncident?.allocatedHospital?.name || 'No hospital allocated'}
             </div>
-            <div className="text-xs text-white/50 leading-tight mt-0.5">Bandra West, Mumbai</div>
+            <div className="text-xs text-white/50 leading-tight mt-0.5">
+              {activeIncident?.allocatedHospital?.location?.address || activeIncident?.location?.address || 'Location unavailable'}
+            </div>
 
             <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[9px] font-mono font-semibold">
               <span className="px-2 py-0.5 rounded bg-red-950/60 border border-red-500/40 text-red-300">
-                ICU Ready
+                {activeIncident?.allocatedHospital ? 'Hospital allocated' : 'Awaiting allocation'}
               </span>
               <span className="px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/40 text-cyan-300">
-                {etaMinutes} min ETA
+                {etaDisplay} estimated ETA
               </span>
               <span className="px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                Trauma Team Notified
+                {activeIncident?.assignedAmbulance ? 'Unit assigned' : 'Dispatch unconfirmed'}
               </span>
             </div>
           </div>
@@ -534,22 +719,25 @@ export default function ParamedicPortal() {
             <div className="flex items-baseline gap-2">
               <span className="text-[10px] font-mono text-white/40 uppercase font-semibold">ETA</span>
               <span className="text-3xl font-extrabold text-emerald-400 font-mono tracking-tight">
-                {etaMinutes} <span className="text-sm font-sans font-medium text-emerald-300/70">min</span>
+                {etaDisplay}
+                {etaSecondsLeft !== null && !['AT_PATIENT', 'ARRIVED_AT_HOSPITAL', 'COMPLETED'].includes(dispatchStatus) && (
+                  <span className="text-sm font-sans font-medium text-emerald-300/70"> countdown</span>
+                )}
               </span>
             </div>
             <div className="flex items-center gap-3 text-[11px] font-mono text-white/60 mt-0.5">
-              <span>Distance <strong className="text-white">{distanceKm} km</strong></span>
+              <span>Estimated distance <strong className="text-white">{distanceKm} km</strong></span>
               <span>·</span>
-              <span>Speed: <strong className="text-cyan-300">{ambulanceSpeed} km/h</strong></span>
+              <span>Vehicle speed: <strong className="text-cyan-300">{activeAmbulance?.currentLocation?.speed ?? '—'} km/h</strong></span>
             </div>
 
             <div className="flex items-center gap-2 mt-2">
               <div className="px-2.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-bold flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]" />
-                <span>Green Corridor ACTIVE</span>
+                <span>Green corridor: demo only</span>
               </div>
               <span className="text-[10px] font-mono text-emerald-400/80 flex items-center gap-1">
-                <span>✓</span> Signals Synchronized
+                <span>•</span> No live signal feed
               </span>
             </div>
           </div>
@@ -566,13 +754,13 @@ export default function ParamedicPortal() {
         <div className="lg:col-span-3">
           <button
             onClick={() => {
+              if (!activeIncident?._id) return toast.error('No active incident. Trauma alert was not sent.')
               const socket = getSocket()
-              if (socket) {
-                socket.emit('trauma_alert', { incidentId: activeIncident?._id, vitals: patientVitals })
-              }
-              toast.error(
-                `🚨 High-Priority Trauma Alert Broadcast to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`
-              )
+              if (!socket?.connected) return toast.error('Live connection is unavailable. Trauma alert was not sent.')
+              socket.timeout(3000).emit('trauma_alert', { incidentId: activeIncident._id, vitals: patientVitals }, (err, result) => {
+                if (err || !result?.success) toast.error(`Trauma alert was not confirmed: ${result?.message || 'connection timed out'}`)
+                else toast.success('Trauma alert delivered to connected incident listeners.')
+              })
             }}
             className="w-full h-full p-4 rounded-2xl bg-gradient-to-r from-[#8b1424] via-[#b5172e] to-[#8b1424] hover:from-[#b5172e] hover:to-[#c91a33] border border-red-500/50 shadow-[0_0_30px_rgba(255,45,74,0.35)] flex items-center justify-center gap-3 text-left transition-all group"
           >
@@ -588,36 +776,54 @@ export default function ParamedicPortal() {
       {/* ── WORKSPACE BODY ── */}
       {paramedicTab === 'nav' && (
         <div className="flex-1 flex flex-col space-y-3 px-4 pb-4 overflow-y-auto">
-          {/* Turn-by-Turn Instruction Bar */}
-          <div className="px-4 py-2.5 rounded-xl bg-[#0a0f1d] border border-cyan-500/30 shadow-lg flex items-center justify-between gap-4 shrink-0 text-left">
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 text-xl font-bold shrink-0">
-                ↰
-              </div>
-              <div>
-                <div className="text-sm font-extrabold text-white leading-tight">
-                  In 300 m, keep left on Western Express Flyover
+          {/* Route maneuvers are an estimate from the last reported vehicle location. */}
+          {(() => {
+            const steps = routeData?.steps
+            const current = steps?.length ? describeManeuver(steps[currentStepIdx]) : null
+            const next = steps?.length ? describeManeuver(steps[currentStepIdx + 1]) : null
+            return (
+              <div className="px-4 py-2.5 rounded-xl bg-[#0a0f1d] border border-cyan-500/30 shadow-lg flex items-center justify-between gap-4 shrink-0 text-left">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 text-xl font-bold shrink-0">
+                    {current ? current.icon : '↰'}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-extrabold text-white leading-tight truncate">
+                      {current
+                        ? `${current.text}${current.distance ? ` · in ${current.distance} m` : ''}`
+                        : 'No route estimate available for the current vehicle location'}
+                    </div>
+            <div className="text-[11px] text-emerald-400 font-mono leading-tight truncate">
+                      {next ? `Next preview step: ${next.text}` : 'Route preview only; steps do not advance with vehicle GPS'}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-[11px] text-emerald-400 font-mono leading-tight">
-                  Corridor Priority Active — Green Wave Synchronized
+
+                <div className="flex items-center gap-4 shrink-0">
+                  <button
+                    onClick={() => recenter()}
+                    className="px-3 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-mono text-white/80 transition-all flex items-center gap-1.5"
+                  >
+                    <span>Recenter</span>
+                    <span>⤢</span>
+                  </button>
                 </div>
               </div>
-            </div>
+            )
+          })()}
 
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => recenter()}
-                className="px-3 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-mono text-white/80 transition-all flex items-center gap-1.5"
-              >
-                <span>Recenter</span>
-                <span>⤢</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Center: Live 3D Mapbox Navigation Engine */}
+          {/* Map initializes only when a real vehicle position is available. */}
           <div className="h-[320px] lg:h-[380px] rounded-2xl overflow-hidden border border-white/[0.08] relative shadow-2xl shrink-0">
             <div ref={mapRef} className="w-full h-full" />
+            {(!Array.isArray(activeAmbulance?.currentLocation?.coordinates) || activeAmbulance.currentLocation.coordinates.length !== 2 ||
+              !activeAmbulance.currentLocation.coordinates.every(Number.isFinite) ||
+              activeAmbulance.currentLocation.coordinates[0] < -180 || activeAmbulance.currentLocation.coordinates[0] > 180 ||
+              activeAmbulance.currentLocation.coordinates[1] < -90 || activeAmbulance.currentLocation.coordinates[1] > 90 ||
+              (activeAmbulance.currentLocation.coordinates[0] === 0 && activeAmbulance.currentLocation.coordinates[1] === 0)) && (
+              <div className="absolute inset-0 z-10 bg-[#090d16] flex items-center justify-center px-6 text-center text-sm font-mono text-white/60">
+                No vehicle GPS position is available. The map will appear after the vehicle reports its location.
+              </div>
+            )}
 
             {/* Map Left Controls HUD */}
             <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
@@ -651,7 +857,7 @@ export default function ParamedicPortal() {
 
             {/* Bottom Left Map Overlay */}
             <div className="absolute bottom-3 left-4 z-20 text-[10px] font-mono text-white/50">
-              <span className="font-bold text-white text-xs">Mumbai EMS</span> · Real Traffic Navigation View
+              <span className="font-bold text-white text-xs">Field navigation</span> · Last reported vehicle position
             </div>
           </div>
 
@@ -663,18 +869,19 @@ export default function ParamedicPortal() {
             >
               📡 Transmit Vitals to ER
             </button>
-            <button
-              onClick={handleArrived}
-              className="py-3 rounded-xl bg-yellow-600/30 hover:bg-yellow-600/50 border border-yellow-500/50 text-yellow-300 font-mono text-xs font-bold transition-all shadow-lg"
-            >
-              📍 Arrived at Patient
-            </button>
-            <button
-              onClick={handleHandedOver}
-              className="py-3 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-300 font-mono text-xs font-bold transition-all shadow-lg"
-            >
-              🤝 Handed Over to ER
-            </button>
+            {dispatchStatus === 'AT_PATIENT' ? (
+              <button onClick={handleEnRouteToHospital} className="py-3 rounded-xl bg-yellow-600/30 hover:bg-yellow-600/50 border border-yellow-500/50 text-yellow-300 font-mono text-xs font-bold transition-all shadow-lg">
+                🚑 En route to hospital
+              </button>
+            ) : dispatchStatus === 'EN_ROUTE_TO_HOSPITAL' || dispatchStatus === 'ARRIVED_AT_HOSPITAL' ? (
+              <button onClick={handleHandedOver} className="py-3 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-300 font-mono text-xs font-bold transition-all shadow-lg">
+                🤝 Handed Over to ER
+              </button>
+            ) : (
+              <button onClick={handleArrived} className="py-3 rounded-xl bg-yellow-600/30 hover:bg-yellow-600/50 border border-yellow-500/50 text-yellow-300 font-mono text-xs font-bold transition-all shadow-lg">
+                📍 Arrived at Patient
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -684,9 +891,9 @@ export default function ParamedicPortal() {
         <div className="flex-1 p-5 space-y-5 overflow-y-auto text-left">
           <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
             <div>
-              <h2 className="text-xl font-extrabold text-white">Live Patient Vitals & On-Scene Stabilization</h2>
+              <h2 className="text-xl font-extrabold text-white">Patient Vitals & On-Scene Notes</h2>
               <p className="text-xs text-white/50 font-mono mt-0.5">
-                Adjust clinical measurements directly. Synchronizes instantly with the destination trauma room.
+                {vitalsSource === 'incident' ? 'Showing values saved on this incident; no patient monitor is connected.' : 'Demo values only. Enter measurements manually before sharing; no patient monitor is connected.'}
               </p>
             </div>
 
@@ -704,6 +911,13 @@ export default function ParamedicPortal() {
               <div className="text-xs font-mono text-red-400 font-bold uppercase">❤️ Heart Rate (Pulse)</div>
               <div className="text-4xl font-extrabold text-white font-mono">
                 {patientVitals.heartRate} <span className="text-sm font-normal text-white/50">BPM</span>
+              </div>
+              <div className="h-10 -mx-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={vitalsHistory}>
+                    <Line type="monotone" dataKey="heartRate" stroke="#f87171" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -726,6 +940,13 @@ export default function ParamedicPortal() {
               <div className="text-xs font-mono text-yellow-400 font-bold uppercase">💉 Blood Pressure</div>
               <div className="text-4xl font-extrabold text-white font-mono">
                 {patientVitals.bpSystolic}/{patientVitals.bpDiastolic}
+              </div>
+              <div className="h-10 -mx-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={vitalsHistory}>
+                    <Line type="monotone" dataKey="bpSystolic" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -753,6 +974,13 @@ export default function ParamedicPortal() {
             <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-cyan-500/40 space-y-3">
               <div className="text-xs font-mono text-cyan-400 font-bold uppercase">🫁 Oxygen Saturation</div>
               <div className="text-4xl font-extrabold text-white font-mono">{patientVitals.spO2}%</div>
+              <div className="h-10 -mx-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={vitalsHistory}>
+                    <Line type="monotone" dataKey="spO2" stroke="#22d3ee" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => adjustVital('spO2', -1)}
@@ -794,36 +1022,77 @@ export default function ParamedicPortal() {
 
       {/* SUBVIEW 3: PROTOCOLS */}
       {paramedicTab === 'protocols' && (
-        <div className="flex-1 p-5 space-y-5 overflow-y-auto text-left">
-          <div className="pb-3 border-b border-white/[0.08]">
-            <h2 className="text-xl font-extrabold text-white">Pre-Hospital Clinical Checklists</h2>
-            <p className="text-xs text-white/50 font-mono mt-0.5">
-              Protocol adherence checklist for trauma handoff and pharmacotherapy.
-            </p>
+        <div className="flex-1 p-5 space-y-8 overflow-y-auto text-left">
+          <div>
+            <div className="pb-3 border-b border-white/[0.08]">
+              <h2 className="text-xl font-extrabold text-white">AI-Suggested Clinical Actions</h2>
+              <p className="text-xs text-white/50 font-mono mt-0.5">
+                {activeIncident?.triageData?.recommendedActions?.length
+                  ? 'Generated by MediRoute AI triage for the current incident.'
+                  : 'Protocol adherence checklist for trauma handoff and pharmacotherapy.'}
+              </p>
+            </div>
+
+            <div className="space-y-3 mt-4">
+              {(activeIncident?.triageData?.recommendedActions?.length
+                ? activeIncident.triageData.recommendedActions.map((text, idx) => ({ id: `ai-${idx}`, text, done: false }))
+                : activeChecklist
+              ).map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() =>
+                    setActiveChecklist((prev) =>
+                      prev.some((c) => c.id === item.id)
+                        ? prev.map((c) => (c.id === item.id ? { ...c, done: !c.done } : c))
+                        : prev
+                    )
+                  }
+                  className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                    item.done
+                      ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                      : 'bg-white/[0.02] border-white/10 text-white/80 hover:bg-white/[0.05]'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 font-mono text-sm">
+                    <span className="text-lg">{item.done ? '☑' : '☐'}</span>
+                    <span>{item.text}</span>
+                  </div>
+                  <span className="text-xs font-mono text-white/40">{item.done ? 'COMPLETED' : 'PENDING'}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {activeChecklist.map((item) => (
-              <div
-                key={item.id}
-                onClick={() =>
-                  setActiveChecklist((prev) =>
-                    prev.map((c) => (c.id === item.id ? { ...c, done: !c.done } : c))
-                  )
-                }
-                className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                  item.done
-                    ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
-                    : 'bg-white/[0.02] border-white/10 text-white/80 hover:bg-white/[0.05]'
-                }`}
-              >
-                <div className="flex items-center gap-3 font-mono text-sm">
-                  <span className="text-lg">{item.done ? '☑' : '☐'}</span>
-                  <span>{item.text}</span>
+          <div>
+            <div className="pb-3 border-b border-white/[0.08]">
+              <h2 className="text-xl font-extrabold text-white">Pre-Arrival Trauma Checklist</h2>
+              <p className="text-xs text-white/50 font-mono mt-0.5">
+                Checklist is saved only in this browser — it is not shared with the hospital. This is a workflow aid, not medical guidance.
+              </p>
+            </div>
+
+            <div className="space-y-2 mt-4">
+              {traumaChecklist.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => toggleTraumaChecklistItem(item.id)}
+                  className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all min-h-[52px] ${
+                    item.done
+                      ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                      : 'bg-white/[0.02] border-white/10 text-white/80 hover:bg-white/[0.05]'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 font-mono text-sm min-w-0">
+                    <span className="text-lg shrink-0">{item.done ? '☑' : '☐'}</span>
+                    <span className="min-w-0">
+                      <span className="block text-[10px] uppercase tracking-wider text-white/40">{item.category}</span>
+                      <span className="block truncate">{item.label}</span>
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-white/40 shrink-0">{item.done ? 'DONE' : 'PENDING'}</span>
                 </div>
-                <span className="text-xs font-mono text-white/40">{item.done ? 'COMPLETED' : 'PENDING'}</span>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -834,7 +1103,7 @@ export default function ParamedicPortal() {
           <div className="pb-3 border-b border-white/[0.08]">
             <h2 className="text-xl font-extrabold text-white">Whisper Speech-to-Text Clinical Dictation</h2>
             <p className="text-xs text-white/50 font-mono mt-0.5">
-              Hands-free voice transcription synced into the patient’s emergency electronic chart.
+              Records up to 5 seconds and saves a successful Groq Whisper transcript to the active incident. Failures create no placeholder note.
             </p>
           </div>
 
@@ -850,7 +1119,7 @@ export default function ParamedicPortal() {
               🎙️
             </button>
             <div className="text-sm font-bold text-white">
-              {isRecordingVoice ? 'Listening & Transcribing via OpenAI Whisper...' : 'Tap to Start Hands-Free Dictation'}
+              {isRecordingVoice ? 'Recording for Groq Whisper…' : 'Tap to record a short voice note'}
             </div>
           </div>
 

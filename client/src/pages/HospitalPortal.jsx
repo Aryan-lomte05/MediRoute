@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { PREFETCHED_TRAFFIC_ROUTES } from '../lib/routing'
+import { sendEmergencyAlert } from '../lib/emailService'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
@@ -28,6 +29,7 @@ export default function HospitalPortal() {
   const [intakeStatus, setIntakeStatus] = useState('NORMAL') // 'NORMAL' | 'DIVERT'
   const [bedFilter, setBedFilter] = useState('all') // 'all' | 'occupied' | 'available' | 'cleaning'
   const [inboundIncident, setInboundIncident] = useState(null)
+  const alertedIncidentIdsRef = useRef(new Set())
 
   // Map & Telemetry States
   const [isMapFullscreen, setIsMapFullscreen] = useState(false)
@@ -153,7 +155,27 @@ export default function HospitalPortal() {
     socket.on('incoming_patient', (data) => {
       if (data.incident) {
         setInboundIncident(data.incident)
-        toast.error(`🚨 INBOUND PATIENT ALERT: ${data.incident.triageData?.chiefComplaint || 'Critical Patient'} en route!`, { duration: 8000 })
+        toast.error(`🚨 CRITICAL INCIDENT ALLOCATED: ${data.incident.triageData?.chiefComplaint || 'Patient needs review'}. Ambulance dispatch may still be pending.`, { duration: 8000 })
+
+        // Critical ESI-1/ESI-2 incidents trigger an EmailJS notification — fired once
+        // per incident (state change), never on re-render/reconnect duplicates.
+        const esiLevel = data.incident.triageData?.esiLevel
+        const incidentId = data.incident._id
+        if (esiLevel <= 2 && incidentId && !alertedIncidentIdsRef.current.has(incidentId)) {
+          alertedIncidentIdsRef.current.add(incidentId)
+          sendEmergencyAlert({
+            incidentNumber: data.incident.incidentNumber,
+            chiefComplaint: data.incident.triageData?.chiefComplaint,
+            esiLevel,
+            assignedHospital: data.hospital?.name || hospitalData?.name,
+            assignedAmbulance: data.incident.assignedAmbulance?.vehicleNumber,
+            locationText: data.incident.location?.address,
+            recipientEmail: import.meta.env.VITE_EMERGENCY_ALERT_EMAIL || undefined,
+          }).then((result) => {
+            if (result.success) toast.success(`Email alert accepted by EmailJS for ${data.incident.incidentNumber || 'this incident'}.`)
+            else toast.error(`Email alert was not sent: ${result.error}`)
+          }).catch(() => toast.error('Email alert failed. The incident remains visible in the hospital portal.'))
+        }
       }
     })
 
@@ -170,6 +192,10 @@ export default function HospitalPortal() {
       }
     })
 
+    socket.on('trauma_alert', (data) => {
+      toast.error(`TRAUMA ALERT ${data.incidentNumber ? `for ${data.incidentNumber}` : 'received'} from ${data.sender || 'assigned paramedic'}.`, { duration: 10000 })
+    })
+
     socket.on('hospital_resources_update', (data) => {
       if (data.hospitalId === hospitalData?._id) {
         if (data.resources?.icuBeds) setIcuAvailable(data.resources.icuBeds.available)
@@ -180,6 +206,7 @@ export default function HospitalPortal() {
     return () => {
       socket.off('incoming_patient')
       socket.off('vitals_update')
+      socket.off('trauma_alert')
       socket.off('hospital_resources_update')
     }
   }, [hospitalData?._id])

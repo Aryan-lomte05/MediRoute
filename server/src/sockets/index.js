@@ -2,6 +2,7 @@ const { Server } = require('socket.io')
 const jwt = require('jsonwebtoken')
 const User = require('../models/User')
 const Ambulance = require('../models/Ambulance')
+const Incident = require('../models/Incident')
 
 let io
 
@@ -96,11 +97,31 @@ function initSockets(server) {
     })
 
     // Paramedic vitals update
-    socket.on('vitals_update', (data) => {
-      const { incidentId, vitals } = data
+    socket.on('vitals_update', async (data, acknowledge) => {
+      const { incidentId, vitals } = data || {}
+      const incident = await Incident.findById(incidentId).catch(() => null)
+      if (!incident || user.role !== 'paramedic' || String(incident.assignedAmbulance) !== String(user.ambulanceId)) {
+        if (typeof acknowledge === 'function') acknowledge({ success: false, message: 'Incident assignment could not be verified.' })
+        return
+      }
       socket.to(`incident_${incidentId}`).emit('vitals_update', { incidentId, vitals })
       socket.to('hospital').emit('vitals_update', { incidentId, vitals })
       socket.to('admin').emit('vitals_update', { incidentId, vitals })
+      if (typeof acknowledge === 'function') acknowledge({ success: true })
+    })
+
+    socket.on('trauma_alert', async (data, acknowledge) => {
+      const { incidentId, vitals } = data || {}
+      const incident = await Incident.findById(incidentId).catch(() => null)
+      if (!incident || user.role !== 'paramedic' || String(incident.assignedAmbulance) !== String(user.ambulanceId)) {
+        if (typeof acknowledge === 'function') acknowledge({ success: false, message: 'Incident assignment could not be verified.' })
+        return
+      }
+      const alert = { incidentId: String(incident._id), incidentNumber: incident.incidentNumber, vitals, sender: user.name, timestamp: Date.now() }
+      io.to(`incident_${incident._id}`).emit('trauma_alert', alert)
+      io.to('hospital').emit('trauma_alert', alert)
+      io.to('admin').emit('trauma_alert', alert)
+      if (typeof acknowledge === 'function') acknowledge({ success: true })
     })
 
     // Chat/notes in incident channel

@@ -15,6 +15,7 @@ const incidentRoutes = require('./routes/incidents')
 const hospitalRoutes = require('./routes/hospitals')
 const ambulanceRoutes = require('./routes/ambulances')
 const aiRoutes = require('./routes/ai')
+const twilioRoutes = require('./routes/twilio')
 
 const app = express()
 const server = http.createServer(app)
@@ -54,6 +55,7 @@ app.use('/api/incidents', incidentRoutes)
 app.use('/api/hospitals', hospitalRoutes)
 app.use('/api/ambulances', ambulanceRoutes)
 app.use('/api/ai', aiRoutes)
+app.use('/api/twilio', twilioRoutes)
 
 // Health check
 app.get('/health', (req, res) => {

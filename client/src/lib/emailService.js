@@ -17,6 +17,9 @@
  *    VITE_EMAILJS_PUBLIC_KEY=your_public_key
  */
 
+import emailjs from '@emailjs/browser'
+import { dispatchEmergencyEmail } from './emailDispatch.mjs'
+
 export const emailConfig = {
   serviceId: import.meta.env.VITE_EMAILJS_SERVICE_ID || '',
   templateId: import.meta.env.VITE_EMAILJS_TEMPLATE_ID || '',
@@ -37,14 +40,14 @@ export const emailConfig = {
  */
 export async function sendEmergencyAlert(alertData) {
   const {
-    recipientEmail = 'er-team@mediroute.com',
+    recipientEmail,
     recipientName = 'Emergency Response Team',
-    incidentNumber = 'INC-DEMO',
-    chiefComplaint = 'Trauma Emergency',
+    incidentNumber = 'Unknown incident',
+    chiefComplaint = 'Not provided',
     esiLevel = 1,
-    assignedHospital = 'Lilavati Hospital',
-    assignedAmbulance = 'MH-02-EMS-101',
-    locationText = 'Bandra West, Mumbai',
+    assignedHospital = 'Not assigned',
+    assignedAmbulance = 'Not assigned',
+    locationText = 'Not provided',
   } = alertData
 
   const templateParams = {
@@ -59,33 +62,5 @@ export async function sendEmergencyAlert(alertData) {
     timestamp: new Date().toLocaleString(),
   }
 
-  // If EmailJS credentials are configured and window.emailjs is loaded
-  if (emailConfig.serviceId && emailConfig.templateId && emailConfig.publicKey && window.emailjs) {
-    try {
-      const response = await window.emailjs.send(
-        emailConfig.serviceId,
-        emailConfig.templateId,
-        templateParams,
-        emailConfig.publicKey
-      )
-      console.log('[EmailJS] Alert dispatched successfully:', response.status, response.text)
-      return { success: true, status: response.status }
-    } catch (err) {
-      console.warn('[EmailJS] Dispatched failed, logging locally:', err)
-      return { success: false, error: err }
-    }
-  }
-
-  // Fallback Simulation Mode (when keys are not yet input in .env)
-  console.log('[EmailJS Simulation] Dispatching emergency notification:', {
-    to: recipientEmail,
-    subject: `🚨 [CRITICAL ALERT] ESI ${esiLevel} Incident: ${incidentNumber}`,
-    params: templateParams,
-  })
-
-  return {
-    success: true,
-    simulated: true,
-    message: 'Alert simulated (configure VITE_EMAILJS_* keys in .env for live SMTP delivery)',
-  }
+  return dispatchEmergencyEmail(emailjs, emailConfig, recipientEmail, templateParams)
 }

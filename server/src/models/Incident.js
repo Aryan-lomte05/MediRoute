@@ -30,8 +30,8 @@ const incidentSchema = new mongoose.Schema(
       },
     },
     location: {
-      type: { type: String, enum: ['Point'], default: 'Point' },
-      coordinates: { type: [Number], required: true }, // [lng, lat]
+      type: { type: String, enum: ['Point'] },
+      coordinates: { type: [Number], required: false }, // [lng, lat]; absent while channel awaits a precise location
       address: String,
     },
     assignedAmbulance: { type: mongoose.Schema.Types.ObjectId, ref: 'Ambulance' },
@@ -56,8 +56,10 @@ const incidentSchema = new mongoose.Schema(
       type: String,
       enum: [
         'PENDING',
+        'AWAITING_LOCATION',
         'TRIAGE_COMPLETE',
         'DISPATCHING',
+        'DISPATCHED',
         'EN_ROUTE_TO_PATIENT',
         'AT_PATIENT',
         'EN_ROUTE_TO_HOSPITAL',
@@ -77,6 +79,19 @@ const incidentSchema = new mongoose.Schema(
     },
     voiceTranscript: String,
     notes: String,
+    source: {
+      type: String,
+      enum: ['WEB', 'WHATSAPP', 'VOICE_IVR'],
+      default: 'WEB',
+    },
+    channelMeta: {
+      whatsappFrom: String,
+      whatsappMessageSid: String,
+      callSid: String,
+      recordingUrl: String,
+      recordingTranscriptionState: { type: String, enum: ['PROCESSING', 'COMPLETE', 'FAILED'] },
+    },
+    pipelineState: { type: String, enum: ['NOT_STARTED', 'RUNNING', 'COMPLETE', 'FAILED'], default: 'NOT_STARTED' },
   },
   { timestamps: true }
 )
@@ -84,6 +99,8 @@ const incidentSchema = new mongoose.Schema(
 incidentSchema.index({ location: '2dsphere' })
 incidentSchema.index({ status: 1 })
 incidentSchema.index({ createdAt: -1 })
+incidentSchema.index({ 'channelMeta.callSid': 1 }, { unique: true, sparse: true })
+incidentSchema.index({ 'channelMeta.whatsappMessageSid': 1 }, { unique: true, sparse: true })
 
 // Generate incident number before save
 incidentSchema.pre('save', async function (next) {

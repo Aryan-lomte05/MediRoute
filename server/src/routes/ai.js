@@ -1,6 +1,11 @@
 const express = require('express')
 const axios = require('axios')
+const mongoose = require('mongoose')
 const { auth, optionalAuth } = require('../middleware/auth')
+const { transcribeAudio } = require('../services/whisper')
+const Incident = require('../models/Incident')
+const { canAccessIncident } = require('../middleware/incidentAccess')
+const { MAX_AUDIO_BYTES } = require('../services/twilioSecurity')
 
 const router = express.Router()
 
@@ -205,6 +210,57 @@ router.post('/voice-transcript', auth, async (req, res, next) => {
     )
 
     res.json(triageResult.data)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/ai/whisper-transcribe — Reusable Whisper (Groq) speech-to-text
+// Accepts bounded { audioBase64, mimeType, durationSeconds } from the paramedic
+// voice-log recorder and persists successful notes to the authorized incident.
+router.post('/whisper-transcribe', auth, async (req, res, next) => {
+  try {
+    const { audioBase64, mimeType, durationSeconds, incidentId } = req.body
+
+    if (!audioBase64 || typeof audioBase64 !== 'string') return res.status(400).json({ message: 'Audio is required.' })
+    if (audioBase64.length > Math.ceil(MAX_AUDIO_BYTES * 4 / 3) + 8) return res.status(413).json({ message: 'Audio exceeds the 7 MB limit.' })
+    if (!Number.isFinite(Number(durationSeconds)) || Number(durationSeconds) <= 0 || Number(durationSeconds) > 30) {
+      return res.status(400).json({ message: 'Recording duration must be between 1 and 30 seconds.' })
+    }
+
+    let incident
+    if (incidentId) {
+      if (!mongoose.Types.ObjectId.isValid(incidentId)) return res.status(400).json({ message: 'Invalid incident ID.' })
+      incident = await Incident.findById(incidentId)
+      if (!incident) return res.status(404).json({ message: 'Incident not found.' })
+      if (!canAccessIncident(req.user, incident)) return res.status(403).json({ message: 'You are not assigned to this incident.' })
+    }
+
+    const result = await transcribeAudio({
+      buffer: Buffer.from(audioBase64, 'base64'),
+      mimeType: mimeType || 'audio/webm',
+      filename: `audio.${({
+        'audio/webm': 'webm', 'audio/wav': 'wav', 'audio/x-wav': 'wav',
+        'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'mp4',
+        'audio/m4a': 'm4a', 'audio/ogg': 'ogg', 'audio/flac': 'flac', 'audio/x-flac': 'flac',
+        'video/mp4': 'mp4',
+      })[String(mimeType || 'audio/webm').split(';')[0].toLowerCase()] || 'bin'}`,
+    })
+
+    if (!result.success) {
+      const status = result.error === 'not_configured' ? 503
+        : result.error === 'audio_too_large' ? 413
+          : result.error === 'unsupported_audio_type' ? 415
+            : result.error === 'no_audio' || result.error === 'empty_audio' ? 400 : 502
+      return res.status(status).json({ message: result.message || 'Transcription unavailable' })
+    }
+
+    if (!result.text) return res.status(422).json({ message: 'No speech was detected; no transcript was saved.' })
+    if (incident) {
+      await Incident.findByIdAndUpdate(incident._id, { $set: { voiceTranscript: result.text, notes: result.text } })
+    }
+
+    res.json({ text: result.text })
   } catch (err) {
     next(err)
   }
