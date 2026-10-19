@@ -255,7 +255,7 @@ router.post('/voice-sos', verifyTwilioSignature, async (req, res) => {
       </Say>
     </Gather>
     <Say voice="Polly.Aditi" language="en-IN">We did not receive your input. Connecting you to an operator.</Say>
-    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    ${bridgeOrClose('Polly.Aditi', 'en-IN', 'Your emergency has been logged. Help is being arranged. You can hang up now.')}`)
     )
   }
 
@@ -289,7 +289,7 @@ router.post('/voice-sos', verifyTwilioSignature, async (req, res) => {
       Your emergency has been logged as ${choice.label}. Reference ${incident.incidentNumber.replace(/-/g, ' ')}.
       Stay on the line. An operator will confirm your exact location.
     </Say>
-    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    ${bridgeOrClose('Polly.Aditi', 'en-IN', 'Your emergency has been logged. Help is being arranged. You can hang up now.')}`)
     )
   } catch (err) {
     console.error('[Telephony IVR] Failed to create incident:', err.message)
@@ -300,7 +300,7 @@ router.post('/voice-sos', verifyTwilioSignature, async (req, res) => {
     <Say voice="Polly.Aditi" language="en-IN">
       We could not log your emergency automatically. Connecting you to an operator now.
     </Say>
-    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    ${bridgeOrClose('Polly.Aditi', 'en-IN', 'Your emergency has been logged. Help is being arranged. You can hang up now.')}`)
     )
   }
 })
@@ -412,6 +412,33 @@ const VOICE_LANGS = {
 
 const DEFAULT_VOICE_LANG = 'en'
 
+
+/**
+ * Bridge to a human, or close the call cleanly.
+ *
+ * EMERGENCY_DISPATCH_HOTLINE defaults to 108, which is an Indian three-digit
+ * short code. Twilio cannot dial that from a US number, so every <Dial> failed
+ * and the call dropped immediately after the agent said it was connecting
+ * someone: the worst possible moment to hang up on a caller.
+ *
+ * A bridge is now attempted only for a full E.164 number. Otherwise the call
+ * ends with a spoken confirmation, which is honest and does not pretend a
+ * transfer happened.
+ */
+function bridgeOrClose(voice, lang, closingLine) {
+  const operator = twilioConfig.emergencyDispatchNumber
+  const dialable = typeof operator === 'string' && /^\+[1-9]\d{7,14}$/.test(operator)
+
+  if (dialable) {
+    return `<Dial timeout="30">${operator}</Dial>`
+  }
+
+  return (
+    `<Say voice="${voice}" language="${lang}">${sayEscape(closingLine)}</Say>` +
+    `<Hangup/>`
+  )
+}
+
 /** XML-escape anything spoken, so a transcript cannot break the TwiML. */
 const sayEscape = (text) =>
   String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -447,23 +474,37 @@ router.post('/voice-ai', verifyTwilioSignature, async (req, res) => {
   if (turn === 0 && !speech) {
     return res.type('text/xml').send(
       twiml(`
-    <Gather input="speech dtmf" numDigits="1" language="en-IN" speechTimeout="auto"
+    <Gather input="speech" language="en-IN" speechTimeout="auto" timeout="8"
             action="${nextUrl({ lang: 'en', turn: 1 })}" method="POST">
-      <Say voice="Polly.Aditi" language="en-IN">MediRoute Emergency. Tell me what has happened.</Say>
-      <Say voice="Polly.Aditi" language="hi-IN">आप हिंदी में भी बोल सकते हैं। बताइए क्या हुआ है।</Say>
-      <Say voice="Polly.Aditi" language="mr-IN">तुम्ही मराठीत सुद्धा बोलू शकता.</Say>
+      <Say voice="Polly.Aditi" language="en-IN">MediRoute Emergency. Tell me what has happened. You may speak Hindi or Marathi.</Say>
     </Gather>
-    <Say voice="Polly.Aditi" language="en-IN">I did not hear anything. Connecting you to an operator.</Say>
-    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    <Gather input="speech" language="en-IN" speechTimeout="auto" timeout="8"
+            action="${nextUrl({ lang: 'en', turn: 1 })}" method="POST">
+      <Say voice="Polly.Aditi" language="en-IN">I did not hear you. Please say what has happened.</Say>
+    </Gather>
+    ${bridgeOrClose('Polly.Aditi', 'en-IN', 'Please call back and describe your emergency after the tone.')}`)
     )
   }
 
-  // Nothing heard on a later leg: do not loop forever on a silent line.
+  /*
+   * Nothing heard on a later leg. Ask once more, then stop: a silent line
+   * should not loop forever, but ending an emergency call on a single missed
+   * utterance is worse.
+   */
   if (!speech) {
+    if (turn < 3) {
+      return res.type('text/xml').send(
+        twiml(`
+    <Gather input="speech" language="${voice.stt}" speechTimeout="auto" timeout="8"
+            action="${nextUrl({ lang, turn: turn + 1, sofar })}" method="POST">
+      <Say voice="${voice.tts}" language="${voice.stt}">I did not hear you. Please say what has happened.</Say>
+    </Gather>
+    ${bridgeOrClose(voice.tts, voice.stt, 'Please call back and describe your emergency.')}`)
+      )
+    }
+
     return res.type('text/xml').send(
-      twiml(`
-    <Say voice="${voice.tts}" language="${voice.stt}">Connecting you to an operator now.</Say>
-    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+      twiml(bridgeOrClose(voice.tts, voice.stt, 'Please call back and describe your emergency.'))
     )
   }
 
@@ -502,7 +543,7 @@ router.post('/voice-ai', verifyTwilioSignature, async (req, res) => {
         twiml(`
     <Say voice="${replyVoice.tts}" language="${replyVoice.stt}">${sayEscape(decision.reply)}</Say>
     <Say voice="${replyVoice.tts}" language="${replyVoice.stt}">${sayEscape(decision.closing || '')}</Say>
-    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    ${bridgeOrClose(voice.tts, voice.stt, 'Your emergency has been logged. Help is being arranged. You can hang up now.')}`)
       )
     }
 
@@ -514,7 +555,7 @@ router.post('/voice-ai', verifyTwilioSignature, async (req, res) => {
       <Say voice="${replyVoice.tts}" language="${replyVoice.stt}">${sayEscape(decision.reply)}</Say>
     </Gather>
     <Say voice="${replyVoice.tts}" language="${replyVoice.stt}">Connecting you to an operator.</Say>
-    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    ${bridgeOrClose(voice.tts, voice.stt, 'Your emergency has been logged. Help is being arranged. You can hang up now.')}`)
     )
   } catch (err) {
     console.error('[Telephony AI] Voice agent failed:', err.message)
@@ -538,7 +579,7 @@ router.post('/voice-ai', verifyTwilioSignature, async (req, res) => {
     return res.type('text/xml').send(
       twiml(`
     <Say voice="${voice.tts}" language="${voice.stt}">Your emergency has been logged. Connecting you to an operator now.</Say>
-    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    ${bridgeOrClose(voice.tts, voice.stt, 'Your emergency has been logged. Help is being arranged. You can hang up now.')}`)
     )
   }
 })
