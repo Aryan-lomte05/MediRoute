@@ -25,6 +25,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUiStore } from '../store/uiStore'
+import ProductTour from './ProductTour'
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GLOSSARY
@@ -255,10 +256,16 @@ export function GuideOverlay({ tourId, title, steps, onClose }) {
  * Shows the walkthrough automatically the first time someone opens a portal,
  * then never again unless they ask. Returning staff are not interrupted.
  */
-export function GuideButton({ tourId, title, steps, autoStart = true, className = '' }) {
+/**
+ * @param {string} [tourTrack] A key from tourTracks (citizen, paramedic,
+ *   hospital, admin). When given, a second control offers the full narrated
+ *   walkthrough for that role alongside the quick orientation overlay.
+ */
+export function GuideButton({ tourId, title, steps, tourTrack, autoStart = true, className = '' }) {
   const hasCompleted = useUiStore((s) => Boolean(s.completedTours[tourId]))
   const resetTour = useUiStore((s) => s.resetTour)
   const [open, setOpen] = useState(false)
+  const [tourOpen, setTourOpen] = useState(false)
 
   useEffect(() => {
     if (autoStart && !hasCompleted) {
@@ -270,6 +277,21 @@ export function GuideButton({ tourId, title, steps, autoStart = true, className 
 
   return (
     <>
+      {/*
+        Two levels of help: a few lines of orientation that runs once on a first
+        visit, and the full narrated walkthrough for this role on demand.
+      */}
+      {tourTrack && (
+        <button
+          type="button"
+          onClick={() => setTourOpen(true)}
+          title="Watch the walkthrough for this role"
+          className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 text-[11px] font-semibold text-white/65 hover:text-white hover:border-white/40 transition-colors"
+        >
+          <span aria-hidden="true">▶</span> Walkthrough
+        </button>
+      )}
+
       <button
         type="button"
         onClick={() => {
@@ -288,6 +310,8 @@ export function GuideButton({ tourId, title, steps, autoStart = true, className 
           <GuideOverlay tourId={tourId} title={title} steps={steps} onClose={() => setOpen(false)} />
         )}
       </AnimatePresence>
+
+      {tourOpen && <ProductTour track={tourTrack} onClose={() => setTourOpen(false)} />}
     </>
   )
 }

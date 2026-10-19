@@ -667,6 +667,7 @@ export default function ParamedicPortal() {
           <ModeToggle portal="paramedic" className="hidden md:inline-flex" />
           <GuideButton
             tourId="paramedic-v1"
+              tourTrack="paramedic"
             title="Field Console"
             steps={PARAMEDIC_TOUR_STEPS}
           />

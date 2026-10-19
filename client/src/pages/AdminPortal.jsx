@@ -926,6 +926,7 @@ export default function AdminPortal() {
             <ModeToggle portal="admin" className="hidden md:inline-flex" />
             <GuideButton
               tourId="admin-v1"
+              tourTrack="admin"
               title="City Command Centre"
               steps={ADMIN_TOUR_STEPS}
             />

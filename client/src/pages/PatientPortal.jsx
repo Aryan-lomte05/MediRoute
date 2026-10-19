@@ -602,7 +602,8 @@ export default function PatientPortal() {
               Emergency page
             </a>
             <ModeToggle portal="patient" className="hidden md:inline-flex" />
-            <GuideButton tourId="patient-v1" title="Your MediRoute account" steps={PATIENT_TOUR_STEPS} />
+            <GuideButton tourId="patient-v1"
+              tourTrack="citizen" title="Your MediRoute account" steps={PATIENT_TOUR_STEPS} />
           </div>
 
           {isDispatched ? (

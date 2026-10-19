@@ -33,6 +33,20 @@ const incidentSchema = new mongoose.Schema(
     reporterType: { type: String, enum: ['SELF', 'BYSTANDER'], default: 'SELF' },
 
     /**
+     * How the report reached us.
+     *
+     * The command centre groups the feed by this, and the telephony webhooks
+     * set it. It was being written without being declared here, so Mongoose
+     * strict mode discarded it and every call and SMS looked like an app
+     * report.
+     */
+    channel: {
+      type: String,
+      enum: ['app', 'sos', 'sms', 'call', 'whatsapp'],
+      default: 'app',
+    },
+
+    /**
      * Callback details for an anonymous reporter. Kept separate from
      * patientDetails because for a BYSTANDER report these describe a different
      * person from the patient, and dispatch needs to reach the caller at scene.

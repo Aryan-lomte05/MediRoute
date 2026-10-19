@@ -16,6 +16,7 @@ const incidentRoutes = require('./routes/incidents')
 const hospitalRoutes = require('./routes/hospitals')
 const ambulanceRoutes = require('./routes/ambulances')
 const aiRoutes = require('./routes/ai')
+const telephonyRoutes = require('./routes/telephony')
 
 const app = express()
 const server = http.createServer(app)
@@ -113,6 +114,18 @@ app.use('/api/incidents', incidentRoutes)
 app.use('/api/hospitals', hospitalRoutes)
 app.use('/api/ambulances', ambulanceRoutes)
 app.use('/api/ai', aiRoutes)
+
+/**
+ * Telephony webhooks (Twilio).
+ *
+ * These were never mounted, so every /api/telephony/* path returned 404 and
+ * the webhooks Twilio would call did not exist on any running server.
+ *
+ * Twilio posts form-encoded bodies, not JSON, and signs each request. The
+ * urlencoded parser above handles the body; signature verification lives in
+ * the router so an unsigned request cannot drive a dispatch.
+ */
+app.use('/api/telephony', telephonyRoutes)
 
 // Health check
 app.get('/health', (req, res) => {

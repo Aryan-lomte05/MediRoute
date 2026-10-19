@@ -34,6 +34,8 @@ const Ambulance = require('../models/Ambulance')
 const Hospital = require('../models/Hospital')
 const { auth, authorize, optionalAuth } = require('../middleware/auth')
 const aiService = require('../services/aiService')
+// Outbound SMS and WhatsApp. Reports honestly whether anything was delivered.
+const twilioService = require('../services/twilioService')
 
 const router = express.Router()
 
@@ -228,6 +230,77 @@ function buildPrepChecklist(triage) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// OUTBOUND NOTIFICATIONS
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tell the people outside the app that a unit is on its way.
+ *
+ * Two messages: one to the crew with the job, one to the reporter confirming a
+ * vehicle is coming. Both go through twilioService, which reports honestly
+ * whether anything was actually delivered. With no credentials configured it
+ * returns success: false and logs the body it would have sent, so a demo can
+ * never mistake a logged message for a delivered one.
+ *
+ * Failures are logged and swallowed: the dispatch has already happened and an
+ * SMS problem must not roll it back or stop the pipeline.
+ */
+async function notifyDispatch(incident, ambulance) {
+  const results = {}
+
+  // The crew, if their unit has a contact number on the record.
+  const crewPhone = ambulance.assignedCrew?.[0]?.phone || ambulance.contactPhone || null
+  if (crewPhone) {
+    results.crew = await twilioService.sendParamedicDispatchAlert({
+      paramedicPhone: crewPhone,
+      vehicleNumber: ambulance.vehicleNumber,
+      incidentId: incident.incidentNumber,
+      priority: `ESI ${incident.triageData?.esiLevel ?? '?'}`,
+      address: incident.location?.address,
+    })
+  }
+
+  // The person who reported it.
+  const reporterPhone = incident.reporterContact?.phone || incident.patientDetails?.phone || null
+  if (reporterPhone) {
+    results.reporter = await twilioService.sendEmergencyContactAlert({
+      patientName: incident.patientDetails?.name,
+      contactPhone: reporterPhone,
+      incidentId: incident.incidentNumber,
+      locationText: incident.location?.address,
+    })
+  }
+
+  /*
+   * For the most urgent cases only, also ring the reporter and bridge them to
+   * an operator. A call gets attention an SMS does not, and the operator can
+   * take the exact location, which is the detail most often missing from a
+   * phone report. Reserved for ESI 1 so the system does not ring people for
+   * everything.
+   */
+  if (reporterPhone && incident.triageData?.esiLevel === 1) {
+    results.call = await twilioService.callReporterForCriticalIncident({
+      phone: reporterPhone,
+      incidentNumber: incident.incidentNumber,
+      vehicleNumber: ambulance.vehicleNumber,
+      etaMinutes: incident.route?.etaMinutes,
+    })
+  }
+
+  const sent = Object.values(results).filter((r) => r?.delivered).length
+  const attempted = Object.keys(results).length
+
+  if (attempted > 0) {
+    console.log(
+      `[Dispatch] Notifications for ${incident.incidentNumber}: ${sent}/${attempted} delivered` +
+        (sent < attempted ? ' (Twilio not configured or send failed)' : '')
+    )
+  }
+
+  return results
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // DISPATCH PIPELINE
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -338,6 +411,18 @@ async function runDispatchPipeline(incidentId, io) {
     ])
 
     console.log(`[Dispatch] Unit ${ambulance.vehicleNumber} -> ${fresh.incidentNumber} (${distanceKm ?? '?'}km)`)
+
+    /**
+     * Outbound notifications.
+     *
+     * Detached and individually guarded: a carrier outage must never stop a
+     * dispatch that has already happened. Each call reports whether it was
+     * genuinely delivered, and with no Twilio credentials configured it
+     * reports success: false rather than pretending to have sent anything.
+     */
+    notifyDispatch(fresh, ambulance).catch((err) =>
+      console.warn('[Dispatch] Notification step failed:', err.message)
+    )
 
     if (io) {
       const payload = { incidentId, incident: fresh, ambulance, etaMinutes: etaMinutes(distanceKm), distanceKm }
@@ -907,3 +992,13 @@ router.post('/:id/allocate', auth, authorize(...STAFF_ROLES), async (req, res, n
 })
 
 module.exports = router
+
+/**
+ * Exported so other intake channels can use the same dispatch path.
+ *
+ * The telephony webhooks create incidents from SMS and IVR calls. Without this
+ * they would have to reimplement triage, allocation and unit assignment, which
+ * is how the SMS handler ended up writing a half-formed incident that was
+ * never actually dispatched.
+ */
+module.exports.runDispatchPipeline = runDispatchPipeline

@@ -597,6 +597,7 @@ export default function HospitalPortal() {
           <ModeToggle portal="hospital" className="hidden md:inline-flex" />
           <GuideButton
             tourId="hospital-v1"
+              tourTrack="hospital"
             title="Emergency Department"
             steps={HOSPITAL_TOUR_STEPS}
           />
