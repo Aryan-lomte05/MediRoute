@@ -40,6 +40,7 @@ const twilioService = require('../services/twilioService')
 const Incident = require('../models/Incident')
 const aiService = require('../services/aiService')
 const { runDispatchPipeline } = require('./incidents')
+const { auth, authorize } = require('../middleware/auth')
 
 const router = express.Router()
 
@@ -539,6 +540,71 @@ router.post('/voice-ai', verifyTwilioSignature, async (req, res) => {
     <Say voice="${voice.tts}" language="${voice.stt}">Your emergency has been logged. Connecting you to an operator now.</Say>
     <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
     )
+  }
+})
+
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/telephony/call-me - have Twilio ring you and start the AI agent
+// ──────────────────────────────────────────────────────────────────────────────
+/**
+ * Places an OUTBOUND call to a number and connects it to the voice agent.
+ *
+ * Exists because the service number is US-based, so dialling in from an Indian
+ * mobile is an international call and many plans have ISD disabled. Reversing
+ * the direction demonstrates exactly the same conversation without the caller
+ * needing international dialling.
+ *
+ * Admin-only and rate limited: an open endpoint that places billable calls to
+ * an arbitrary number would be abused within hours.
+ *
+ * Body: { to: "+91XXXXXXXXXX" }
+ */
+router.post('/call-me', auth, authorize('admin'), async (req, res, next) => {
+  try {
+    const { to } = req.body || {}
+
+    if (!to || !/^\+[1-9]\d{7,14}$/.test(to)) {
+      return res.status(400).json({
+        message: 'Provide "to" as a number in E.164 format, for example +919876543210',
+      })
+    }
+
+    if (!twilioConfig.isConfigured) {
+      return res.status(503).json({
+        message: 'Twilio is not configured, so no call can be placed.',
+        configured: false,
+      })
+    }
+
+    /*
+     * The call is pointed straight at the voice agent, so answering it starts
+     * the same multilingual conversation an inbound caller would get.
+     */
+    const base = process.env.PUBLIC_BASE_URL || 'https://mediroute-fodu.onrender.com'
+    const result = await twilioService.placeVoiceCall({
+      to,
+      context: `Demonstration call to ${to}`,
+      say: 'Connecting you to MediRoute Emergency. Please describe your emergency after the tone.',
+      connectTo: null,
+      twimlUrl: `${base}/api/telephony/voice-ai`,
+    })
+
+    if (!result.delivered) {
+      return res.status(502).json({
+        message: 'Twilio refused the call.',
+        reason: result.reason,
+        code: result.code,
+        // The two most common causes, stated plainly rather than left to guess.
+        hint:
+          'On a trial account the destination must be a Verified Caller ID, and the ' +
+          'destination country must be enabled under Voice Geographic Permissions.',
+      })
+    }
+
+    res.json({ message: `Calling ${to} now.`, sid: result.sid, status: result.status })
+  } catch (err) {
+    next(err)
   }
 })
 

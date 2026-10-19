@@ -196,7 +196,7 @@ class TwilioService {
    *   recording and being hung up on.
    * @returns {Promise<{success: boolean, delivered: boolean, sid?: string, reason?: string}>}
    */
-  async placeVoiceCall({ to, say, context = 'Voice call', connectTo }) {
+  async placeVoiceCall({ to, say, context = 'Voice call', connectTo, twimlUrl }) {
     if (!to) {
       console.warn(`[TwilioService] Skipped ${context}: no number to call.`)
       return { success: false, delivered: false, reason: 'No phone number' }
@@ -220,10 +220,15 @@ class TwilioService {
 
     if (this.client) {
       try {
+        /*
+         * `url` hands the answered call to a webhook, which is what lets an
+         * outbound call enter the conversational agent. `twiml` plays a fixed
+         * message instead. One or the other, never both.
+         */
         const call = await this.client.calls.create({
           from: twilioConfig.fromNumber,
           to,
-          twiml,
+          ...(twimlUrl ? { url: twimlUrl, method: 'POST' } : { twiml }),
           statusCallback: twilioConfig.statusCallbackUrl,
         })
         console.log(`[TwilioService] Placed ${context} (SID: ${call.sid})`)
