@@ -67,7 +67,7 @@ export default defineConfig({
       // The citizen-facing surfaces are mobile-first, so they are tested on a
       // phone profile with touch enabled.
       name: 'mobile',
-      testMatch: /(sos|pwa|landing-mobile)\.spec\.js/,
+      testMatch: /(sos|pwa|landing-mobile|i18n)\.spec\.js/,
       use: { ...devices['Pixel 7'] },
     },
     {

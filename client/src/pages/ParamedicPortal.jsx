@@ -39,6 +39,7 @@ import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { PARAMEDIC_REAL_ROUTE } from '../lib/routing'
 import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import { LanguageSwitcher } from '../lib/i18n'
 import { useUiStore } from '../store/uiStore'
 import AiStatusBadge from '../components/AiStatusBadge'
 
@@ -663,6 +664,7 @@ export default function ParamedicPortal() {
             </div>
           </div>
 
+          <LanguageSwitcher compact />
           <AiStatusBadge className="hidden lg:inline-flex" />
           <ModeToggle portal="paramedic" className="hidden md:inline-flex" />
           <GuideButton

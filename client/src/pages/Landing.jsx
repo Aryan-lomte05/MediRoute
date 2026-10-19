@@ -25,6 +25,7 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 import ProductTour from '../components/ProductTour'
+import { LanguageSwitcher, useT } from '../lib/i18n'
 import { addLayerBelowLabels } from '../lib/mapLayers'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -325,6 +326,9 @@ export default function Landing() {
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]" />
               <span className="font-medium">Live City Telemetry</span>
             </div>
+
+            {/* Language, offered before anything else on a public page. */}
+            <LanguageSwitcher compact className="mr-2" />
 
             {/* Launch Portal button */}
             <button

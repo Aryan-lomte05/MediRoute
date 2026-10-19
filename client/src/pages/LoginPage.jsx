@@ -25,6 +25,7 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { addLayerBelowLabels } from '../lib/mapLayers'
 import { useAuthStore } from '../store/authStore'
+import { LanguageSwitcher } from '../lib/i18n'
 import toast from 'react-hot-toast'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -373,6 +374,11 @@ export default function LoginPage() {
         overflowX: 'hidden',
       }}
     >
+      {/* Public page: the language choice comes before the form. */}
+      <div className="absolute top-4 right-4 z-50">
+        <LanguageSwitcher compact />
+      </div>
+
       {/* ─── REAL LIVE MAPBOX GL 3D MAP CANVAS (BACKGROUND) ─── */}
       <div
         ref={mapContainerRef}

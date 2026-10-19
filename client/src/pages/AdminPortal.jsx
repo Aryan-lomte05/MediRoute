@@ -41,6 +41,7 @@ import { getSocket } from '../lib/socket'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import { LanguageSwitcher } from '../lib/i18n'
 import { useUiStore } from '../store/uiStore'
 import AiStatusBadge from '../components/AiStatusBadge'
 import toast from 'react-hot-toast'
@@ -922,6 +923,7 @@ export default function AdminPortal() {
               <div className="text-xs font-semibold text-white leading-tight">Admin</div>
               <div className="text-[10px] text-white/40 leading-tight">City Dispatcher</div>
             </div>
+            <LanguageSwitcher compact />
             <AiStatusBadge className="hidden lg:inline-flex" />
             <ModeToggle portal="admin" className="hidden md:inline-flex" />
             <GuideButton

@@ -33,6 +33,7 @@ import { useAuthStore } from '../store/authStore'
 import { getSocket } from '../lib/socket'
 import api from '../lib/api'
 import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import { LanguageSwitcher } from '../lib/i18n'
 import { useUiStore } from '../store/uiStore'
 import { CITIZEN_REAL_ROUTE } from '../lib/routing'
 
@@ -601,6 +602,7 @@ export default function PatientPortal() {
             >
               Emergency page
             </a>
+            <LanguageSwitcher compact />
             <ModeToggle portal="patient" className="hidden md:inline-flex" />
             <GuideButton tourId="patient-v1"
               tourTrack="citizen" title="Your MediRoute account" steps={PATIENT_TOUR_STEPS} />
