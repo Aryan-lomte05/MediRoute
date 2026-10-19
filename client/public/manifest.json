@@ -1,5 +1,5 @@
 {
-  "name": "MediRoute — Emergency Help",
+  "name": "MediRoute - Emergency Help",
   "short_name": "MediRoute",
   "description": "Report a medical emergency and track the ambulance. No account needed.",
   "start_url": "/sos",

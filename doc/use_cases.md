@@ -1,4 +1,4 @@
-# MediRoute — Use Case Documentation
+# MediRoute - Use Case Documentation
 
 ## Actors
 
@@ -144,7 +144,7 @@ graph TB
 | **Actor** | Patient, AI Triage Agent |
 | **Precondition** | Patient has triggered SOS; microphone permission granted |
 | **Trigger** | Patient taps the voice triage button |
-| **Main Flow** | 1. Browser records audio (Web Speech API or MediaRecorder) → 2. Audio transcribed by Groq Whisper → 3. Transcript sent to Groq LLM → 4. ESI 1–5 score computed → 5. Required medical specialties identified → 6. Incident updated with triage data → 7. weighted allocation allocator triggered |
+| **Main Flow** | 1. Browser records audio (Web Speech API or MediaRecorder) → 2. Audio transcribed by Groq Whisper → 3. Transcript sent to Groq LLM → 4. ESI 1-5 score computed → 5. Required medical specialties identified → 6. Incident updated with triage data → 7. weighted allocation allocator triggered |
 | **Alternate Flow** | Speech API unavailable → patient types complaint manually |
 | **Postcondition** | Incident has ESI level, AI summary, confidence score, specialty requirements |
 

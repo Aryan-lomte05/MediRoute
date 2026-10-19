@@ -55,7 +55,7 @@ export default function AiStatusBadge({ className = '' }) {
     <span
       title={
         online
-          ? `Clinical AI online — ${health.model}`
+          ? `Clinical AI online - ${health.model}`
           : failed
           ? 'Could not reach the server to check AI status'
           : health?.message || 'Clinical AI unavailable; triage is using the offline protocol'

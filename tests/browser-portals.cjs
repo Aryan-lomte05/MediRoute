@@ -239,7 +239,7 @@ async function main() {
       // exhaust it, which is the limiter working, not a regression. Say so
       // plainly rather than reporting a portal failure.
       if (/too many requests/i.test(auth.message || '')) {
-        console.log('  SKIP  ' + r.label + ' — auth rate limit reached (20 logins / 15 min).')
+        console.log('  SKIP  ' + r.label + ' - auth rate limit reached (20 logins / 15 min).')
         console.log('        Wait for the window to reset and re-run; this is not a failure.')
         continue
       }

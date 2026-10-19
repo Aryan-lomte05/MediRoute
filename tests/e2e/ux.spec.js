@@ -18,7 +18,7 @@ const STAFF_ROUTES = [
   { path: '/patient', role: 'patient' },
 ]
 
-test.describe('UX — public routes', () => {
+test.describe('UX - public routes', () => {
   for (const route of PUBLIC_ROUTES) {
     test(`${route} renders without JS errors and has one h1`, async ({ page }) => {
       const errors = collectErrors(page)
@@ -48,7 +48,7 @@ test.describe('UX — public routes', () => {
   })
 })
 
-test.describe('UX — staff routes', () => {
+test.describe('UX - staff routes', () => {
   for (const route of STAFF_ROUTES) {
     test(`${route.path} renders without JS errors`, async ({ page }) => {
       await loginAs(page, route.role)
@@ -72,7 +72,7 @@ test.describe('UX — staff routes', () => {
   }
 })
 
-test.describe('UX — no fabricated data anywhere', () => {
+test.describe('UX - no fabricated data anywhere', () => {
   // Strings that were previously hardcoded and presented as live readings.
   const GHOSTS = [
     '19 Sep 2026',
@@ -100,7 +100,7 @@ test.describe('UX — no fabricated data anywhere', () => {
   }
 })
 
-test.describe('UX — keyboard access', () => {
+test.describe('UX - keyboard access', () => {
   test('the emergency page is operable by keyboard alone', async ({ page }) => {
     await page.goto('/sos')
 
@@ -128,7 +128,7 @@ test.describe('UX — keyboard access', () => {
   })
 })
 
-test.describe('UX — responsive layout', () => {
+test.describe('UX - responsive layout', () => {
   const sizes = [
     { name: 'small phone', width: 360, height: 740 },
     { name: 'large phone', width: 430, height: 932 },

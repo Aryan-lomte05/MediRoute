@@ -1,3 +1,34 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - REAL-TIME EVENT SERVER (sockets/index.js)
+ *
+ * WHAT IS WHERE:
+ * - initSockets()   Creates the server, authenticates, and wires the rooms
+ * - io.use(...)     Handshake auth: every socket must present a valid JWT
+ * - Room joins      role room, personal room, ambulance room, hospital room
+ * - Event handlers  join_incident, leave_incident, and the telemetry relays
+ *
+ * ROOM MODEL:
+ *   <role>                 'admin' | 'paramedic' | 'hospital_staff' | 'patient'
+ *   user_<userId>          a single person
+ *   ambulance_<id>         the crew working that vehicle
+ *   hospital_<id>          staff at that hospital
+ *   incident_<id>          everyone following one case
+ *
+ * Broadcasts are addressed to rooms rather than to all sockets, so a hospital
+ * only receives the cases allocated to it and a crew only its own dispatch.
+ *
+ * WHO EMITS WHAT:
+ * The dispatch pipeline in routes/incidents.js emits triage_complete,
+ * hospital_allocated, ambulance_assigned and incident_status.
+ * services/unitSimulator.js emits ambulance_location while a unit is moving.
+ * routes/hospitals.js emits blood_bank_update and er_bays_update.
+ *
+ * NOTE ON ANONYMOUS USERS: a citizen reporting through /sos holds no JWT and so
+ * cannot open a socket. Their tracking screen polls GET /api/incidents/:id with
+ * a tracking token instead.
+ * ==============================================================================
+ */
 const { Server } = require('socket.io')
 const jwt = require('jsonwebtoken')
 const User = require('../models/User')
@@ -6,10 +37,34 @@ const Ambulance = require('../models/Ambulance')
 let io
 
 function initSockets(server) {
+  /**
+   * The socket layer carries the same live operational data as the REST API -
+   * patient details, unit positions, hospital capacity - so it is held to the
+   * same origin policy. This previously called callback(null, true)
+   * unconditionally, which accepted a socket from any site on the internet.
+   */
+  const allowedOrigins = [
+    process.env.CLIENT_URL,
+    'https://mediroute-five.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:5174',
+  ].filter(Boolean)
+
+  const isProduction = process.env.NODE_ENV === 'production'
+
   io = new Server(server, {
     cors: {
       origin: (origin, callback) => {
-        callback(null, true)
+        const loopback = origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
+        const allowed =
+          !origin ||
+          allowedOrigins.includes(origin) ||
+          /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin) ||
+          (!isProduction && loopback)
+
+        if (allowed) return callback(null, true)
+        console.warn(`[Socket] Blocked origin: ${origin}`)
+        return callback(null, false)
       },
       credentials: true,
     },

@@ -638,7 +638,7 @@ export default function LoginPage() {
               ))}
             </div>
 
-            {/* ── LIVE TACTICAL TELEMETRY HUD (REAL LIVE ITEM — NO FAKE IMAGES) ── */}
+            {/* ── LIVE TACTICAL TELEMETRY HUD (REAL LIVE ITEM - NO FAKE IMAGES) ── */}
             <div
               style={{
                 borderRadius: 18,
@@ -758,7 +758,7 @@ export default function LoginPage() {
                 “Technology in service of human lives.”
               </p>
               <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 10, fontFamily: 'monospace' }}>
-                — MediRoute
+                - MediRoute
               </span>
             </div>
           </motion.div>

@@ -7,7 +7,7 @@
  * Both the landing hero and the login background inserted their traffic layer
  * with a hardcoded beforeId of 'road-label'. No such layer exists in the
  * current Mapbox dark style, so addLayer threw every time and the live traffic
- * congestion overlay was never drawn — the feature appeared to work only
+ * congestion overlay was never drawn - the feature appeared to work only
  * because the error was swallowed by the surrounding try/catch.
  *
  * Mapbox renames style layers between style versions, so a literal id is never

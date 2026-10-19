@@ -214,8 +214,8 @@ incidentSchema.pre('save', async function (next) {
 /**
  * Last-resort uniqueness guard.
  *
- * If a number still collides — a counter reset, or rows restored from a backup
- * that was taken ahead of the counter — a report must never be lost. Retry once
+ * If a number still collides - a counter reset, or rows restored from a backup
+ * that was taken ahead of the counter - a report must never be lost. Retry once
  * with a distinct suffix rather than failing the request.
  */
 incidentSchema.post('save', function (err, doc, next) {

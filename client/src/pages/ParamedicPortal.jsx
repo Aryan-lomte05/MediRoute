@@ -650,7 +650,7 @@ export default function ParamedicPortal() {
             <div>
               <div>{activeAmbulance?.vehicleNumber || 'No unit assigned'}</div>
               <div className="text-[8px] text-cyan-400/60 leading-none hidden sm:block">
-                {activeAmbulance?.vehicleType?.replace(/_/g, ' ') || '—'}
+                {activeAmbulance?.vehicleType?.replace(/_/g, ' ') || '-'}
               </div>
             </div>
           </div>
@@ -759,7 +759,7 @@ export default function ParamedicPortal() {
               {activeIncident?.allocatedHospital?.name || 'No hospital allocated yet'}
             </div>
             <div className="text-xs text-white/50 leading-tight mt-0.5">
-              {activeIncident?.allocatedHospital?.location?.address || '—'}
+              {activeIncident?.allocatedHospital?.location?.address || '-'}
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[9px] font-mono font-semibold">
@@ -862,7 +862,7 @@ export default function ParamedicPortal() {
                   In 300 m, keep left on Western Express Flyover
                 </div>
                 <div className="text-[11px] text-emerald-400 font-mono leading-tight">
-                  Corridor Priority Active — Green Wave Synchronized
+                  Corridor Priority Active - Green Wave Synchronized
                 </div>
               </div>
             </div>

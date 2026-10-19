@@ -1,3 +1,25 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - HOSPITAL MODEL (models/Hospital.js)
+ *
+ * WHAT IS WHERE:
+ * - location      GeoJSON Point, 2dsphere indexed, used for allocation distance
+ * - capabilities  Specialty tokens matched against a patient's triage needs
+ * - resources     ICU / trauma / general beds and ventilators, totals and free
+ * - bloodBank     Stock per component, written by the ER console
+ * - erBays        The physical bay board for this hospital
+ * - queueStatus   ER wait and the diversion flag
+ *
+ * CAPABILITIES MUST STAY A SUPERSET of SPECIALTIES in services/aiService.js,
+ * which is the vocabulary triage emits. A token triage can produce but a hospital
+ * cannot declare will never match, and those patients silently lose their
+ * specialty score during allocation.
+ *
+ * DIVERSION is a hard constraint, not a weighting: allocateHospital() in
+ * routes/incidents.js refuses to rank a diverting hospital first unless every
+ * candidate is diverting.
+ * ==============================================================================
+ */
 const mongoose = require('mongoose')
 
 const hospitalSchema = new mongoose.Schema(

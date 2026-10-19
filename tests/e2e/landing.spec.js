@@ -1,13 +1,13 @@
 /**
  * ==============================================================================
- * LANDING PAGE + INTERACTIVE WALKTHROUGH — end-to-end UI
+ * LANDING PAGE + INTERACTIVE WALKTHROUGH - end-to-end UI
  * ==============================================================================
  */
 
 import { test, expect } from '@playwright/test'
 import { collectErrors, expectNoErrors } from './helpers.js'
 
-test.describe('Landing — hero and routing', () => {
+test.describe('Landing - hero and routing', () => {
   test('renders the hero and the plain-language steps', async ({ page }) => {
     const errors = collectErrors(page)
     await page.goto('/')
@@ -43,7 +43,7 @@ test.describe('Landing — hero and routing', () => {
   })
 })
 
-test.describe('Landing — interactive walkthrough', () => {
+test.describe('Landing - interactive walkthrough', () => {
   test('opens, plays, and exposes every chapter', async ({ page }) => {
     const errors = collectErrors(page)
     await page.goto('/')
@@ -122,7 +122,7 @@ test.describe('Landing — interactive walkthrough', () => {
   })
 })
 
-test.describe('Landing — the rest of the page works', () => {
+test.describe('Landing - the rest of the page works', () => {
   test('legal modals open and close', async ({ page }) => {
     await page.goto('/')
 

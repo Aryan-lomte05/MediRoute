@@ -1,5 +1,17 @@
 /**
- * MediRoute — Emergency Notification Gateway (EmailJS)
+ * ==============================================================================
+ * MEDIROUTE - EMAIL NOTIFICATION HELPER (lib/emailService.js)
+ *
+ * WHAT IS WHERE:
+ * Client-side helpers for composing notification emails.
+ *
+ * STATUS: not part of the live dispatch path. Nothing in the emergency flow
+ * depends on this; dispatch notifies crews and hospitals over Socket.IO
+ * (server/src/sockets/index.js). Kept for the follow-up messaging feature.
+ * ==============================================================================
+ */
+/**
+ * MediRoute - Emergency Notification Gateway (EmailJS)
  *
  * Provides real-time email dispatch notifications for:
  * 1. Critical Incident Creation (ESI 1 / ESI 2 alerts to ER Chiefs)

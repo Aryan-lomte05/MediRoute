@@ -14,7 +14,7 @@
 Emergency Medical Services (EMS) globally face critical bottlenecks due to fragmented communication, static vehicle routing, lack of real-time hospital bed visibility, and manual emergency triage. This results in delayed response times and high mortality rates during the **"Golden Hour"**.
 
 **MediRoute** automates the entire emergency lifecycle:
-1. **Intake & Triage**: one-tap SOS with **no account required**, optional voice intake transcribed by Groq Whisper, and clinical triage that assigns an ESI 1–5 level in under a second. Every triage result records which engine produced it, so a fallback is never presented as an AI assessment.
+1. **Intake & Triage**: one-tap SOS with **no account required**, optional voice intake transcribed by Groq Whisper, and clinical triage that assigns an ESI 1-5 level in under a second. Every triage result records which engine produced it, so a fallback is never presented as an AI assessment.
 2. **Intelligent Dispatch**: Geospatial proximity engine finding the closest available Advanced/Basic Life Support ambulance.
 3. **Dynamic Hospital Allocation**: hospitals are ranked on real great-circle distance, ER wait, spare capacity and specialty match, with a hard rule that a hospital on diversion cannot be ranked first unless every option is. Falls back to a transparent weighted score when the model is unreachable.
 4. **Routing**: OSRM road-network routing for real distance, ETA and turn-by-turn steps, with live Mapbox traffic congestion on the map layers.
@@ -22,7 +22,7 @@ Emergency Medical Services (EMS) globally face critical bottlenecks due to fragm
 
 ---
 
-## 🆘 Reporting an emergency — no account needed
+## 🆘 Reporting an emergency - no account needed
 
 The public reporting page at **`/sos`** is deliberately outside all
 authentication. A citizen in an emergency never meets a login wall.
@@ -32,7 +32,7 @@ It branches two ways from a single screen:
 | Branch | For | What it asks |
 |---|---|---|
 | **I need help** | The patient themselves | What is wrong, in plain language; optionally spoken aloud |
-| **Someone else needs help** | A bystander helping a stranger | Only what an untrained person can observe — is the person awake, are they breathing, how many are hurt, any danger at the scene |
+| **Someone else needs help** | A bystander helping a stranger | Only what an untrained person can observe - is the person awake, are they breathing, how many are hurt, any danger at the scene |
 
 A bystander is never asked for the patient's blood group or a GCS score, and the
 patient record is left explicitly unidentified rather than being filled in with
@@ -65,8 +65,8 @@ When you launch the web application at `http://localhost:5174/login`, you can ei
 
 ## 🧪 Tests
 
-Three suites exercise the real stack — live database, live models, real
-browser — with no mocking. See [`tests/README.md`](tests/README.md).
+Three suites exercise the real stack - live database, live models, real
+browser - with no mocking. See [`tests/README.md`](tests/README.md).
 
 | Suite | Covers | Checks |
 |---|---|---|

@@ -7,6 +7,16 @@ import { expect } from '@playwright/test'
 export const API = process.env.MEDIROUTE_API || 'http://localhost:5000/api'
 export const EMERGENCY_NUMBER = '108'
 
+/**
+ * Written into the optional phone field by every test that files a report.
+ *
+ * Reports created through the UI carry a real geocoded address, so they are
+ * otherwise indistinguishable from genuine ones. This gives setup and teardown
+ * something precise to clean up, which matters because an open incident holds
+ * an ambulance and the fleet is only four vehicles.
+ */
+export const TEST_PHONE = '+91 00000 00000'
+
 export const ROLES = {
   admin: { email: 'admin@mediroute.com', password: 'admin123', role: 'admin', path: '/admin' },
   paramedic: { email: 'paramedic@mediroute.com', password: 'paramedic123', role: 'paramedic', path: '/paramedic' },
@@ -19,7 +29,7 @@ export const ROLES = {
  * login form for every spec.
  *
  * /api/auth is limited to 20 attempts per 15 minutes, so a token is cached per
- * role for the whole run — otherwise a full suite exhausts the limiter and
+ * role for the whole run - otherwise a full suite exhausts the limiter and
  * every later spec fails for a reason that has nothing to do with the UI.
  */
 const tokenCache = new Map()
@@ -120,6 +130,10 @@ export async function fillSosUpToConfirm(page, branch = 'BYSTANDER') {
 
   await page.getByRole('button', { name: /^continue$/i }).click()
   await expect(page.getByRole('heading', { name: /where should we send help/i })).toBeVisible()
+
+  // Tag the report so teardown can find and close it.
+  const phone = page.getByLabel(/your phone number/i)
+  if (await phone.isVisible().catch(() => false)) await phone.fill(TEST_PHONE)
 }
 
 /**

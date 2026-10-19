@@ -245,7 +245,7 @@ export default function Landing() {
     {
       step: '02',
       title: 'AI Triage Classification',
-      desc: 'Analyze symptoms and assign ESI 1–5 within seconds.',
+      desc: 'Analyze symptoms and assign ESI 1-5 within seconds.',
       color: '#3B82F6',
       icon: (
         <svg className="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>

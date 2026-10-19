@@ -39,6 +39,12 @@ const OPEN = [
 /** Markers written by the suites into incidents they create. */
 const TEST_MARKER = /\[E2E TEST\]|concurrent|lifecycle/i
 
+/**
+ * Reports filed through the UI carry a real geocoded address, so they cannot be
+ * matched on text. The suites write this into the optional phone field instead.
+ */
+const TEST_PHONE = '+91 00000 00000'
+
 async function cleanTestState(label) {
   if (!process.env.MONGODB_URI) {
     console.warn(`[${label}] MONGODB_URI not set; skipping database cleanup`)
@@ -57,6 +63,7 @@ async function cleanTestState(label) {
     $or: [
       { 'location.address': TEST_MARKER },
       { 'triageData.chiefComplaint': /\[E2E TEST\]|test \d/i },
+      { 'reporterContact.phone': TEST_PHONE },
     ],
   })
 

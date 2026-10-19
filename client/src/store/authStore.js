@@ -1,3 +1,24 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - AUTHENTICATION STORE (store/authStore.js)
+ *
+ * WHAT IS WHERE:
+ * - login()     POST /api/auth/login, stores the token and user
+ * - register()  POST /api/auth/register
+ * - logout()    Clears both and drops the Authorization default
+ *
+ * PERSISTENCE:
+ * Zustand's persist middleware writes to localStorage under 'mediroute-auth'.
+ * lib/api.js reads the token from that same key on every request, and
+ * ProtectedRoute in App.jsx reads the user to decide access, so the key name is
+ * load-bearing in three places.
+ *
+ * NOT USED BY /sos:
+ * Public emergency reporting never touches this store. It holds a one-time
+ * tracking token in its own localStorage key instead, so a citizen can follow
+ * their report without an account.
+ * ==============================================================================
+ */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import api from '../lib/api'

@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * PARAMEDIC FIELD CONSOLE — end-to-end UI
+ * PARAMEDIC FIELD CONSOLE - end-to-end UI
  * ==============================================================================
  */
 
@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
   await loginAs(page, 'paramedic')
 })
 
-test.describe('Paramedic — shell', () => {
+test.describe('Paramedic - shell', () => {
   test('loads and renders', async ({ page }) => {
     const errors = collectErrors(page)
     await page.goto('/paramedic')
@@ -41,13 +41,13 @@ test.describe('Paramedic — shell', () => {
     await page.waitForTimeout(4000)
 
     const text = await page.locator('body').innerText()
-    // Either real telemetry, or an explicit absence — never an invented number.
+    // Either real telemetry, or an explicit absence - never an invented number.
     const honest = /no GPS|stationary|--|No unit assigned|No hospital allocated|\d+ km\/h/.test(text)
     expect(honest, 'HUD shows neither real telemetry nor an explicit absence').toBe(true)
   })
 })
 
-test.describe('Paramedic — every tab', () => {
+test.describe('Paramedic - every tab', () => {
   const tabs = [
     { name: /nav|navigation|geonav|3d/i, expect: /eta|destination|distance/i },
     { name: /vitals/i, expect: /heart|spo2|bp|vitals/i },
@@ -73,7 +73,7 @@ test.describe('Paramedic — every tab', () => {
   }
 })
 
-test.describe('Paramedic — checklists and notes are per patient', () => {
+test.describe('Paramedic - checklists and notes are per patient', () => {
   test('the intervention list explains itself when no patient is assigned', async ({ page }) => {
     await page.goto('/paramedic')
     await page.waitForTimeout(3000)
@@ -83,7 +83,7 @@ test.describe('Paramedic — checklists and notes are per patient', () => {
     await btn.click()
 
     const text = await page.locator('body').innerText()
-    // Either real per-patient items, or a clear explanation — never the old
+    // Either real per-patient items, or a clear explanation - never the old
     // fixed four-item list that was identical for every call.
     const ok = /appear here once a patient|administer|apply|control|notify|hand over/i.test(text)
     expect(ok).toBe(true)
@@ -103,7 +103,7 @@ test.describe('Paramedic — checklists and notes are per patient', () => {
   })
 })
 
-test.describe('Paramedic — guidance and density', () => {
+test.describe('Paramedic - guidance and density', () => {
   test('simple mode keeps navigation and vitals only', async ({ page }) => {
     await page.goto('/paramedic')
     await page.waitForTimeout(3000)

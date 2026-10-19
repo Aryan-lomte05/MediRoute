@@ -1,3 +1,24 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - USER MODEL (models/User.js)
+ *
+ * WHAT IS WHERE:
+ * - Core fields        name, email, password, phone, role
+ * - emergencyProfile   Citizen medical details sent to the crew automatically
+ * - Paramedic fields   ambulanceId, certificationNumber
+ * - Hospital fields    hospitalId, specialty, isOnDuty
+ * - pre('save')        bcrypt hashing, skipped when the password is unchanged
+ *
+ * ROLES: 'patient' | 'paramedic' | 'hospital_staff' | 'admin'. These strings are
+ * matched by authorize() in middleware/auth.js, by the room names in
+ * sockets/index.js, and by ProtectedRoute in the client, so renaming one means
+ * changing all four.
+ *
+ * emergencyProfile is copied onto an incident at creation time for a SELF report
+ * only. A BYSTANDER report must not inherit it, because the patient is a
+ * different person; see routes/incidents.js.
+ * ==============================================================================
+ */
 const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
 

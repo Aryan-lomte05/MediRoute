@@ -1,4 +1,4 @@
-# MediRoute — Team Work Division
+# MediRoute - Team Work Division
 ## Aryan & Neil | Mini Project Evaluation
 
 ---
@@ -27,7 +27,7 @@
 
 ---
 
-## 👨‍💻 ARYAN — Complete (Built & Operational)
+## 👨‍💻 ARYAN - Complete (Built & Operational)
 
 ### ✅ Core Infrastructure
 - Vite + React 18 PWA scaffold with Tailwind CSS
@@ -45,20 +45,20 @@
 - Rate limiting & Helmet.js security headers + CORS configuration
 
 ### ✅ Database Layer (Mongoose)
-- **User model** — 4 roles, emergency profile, hospital/ambulance links
-- **Incident model** — full triage data, vitals, allocation scores, status machine (9 states)
-- **Hospital model** — capabilities, resources, queue status, geospatial index
-- **Ambulance model** — live location, status, equipment, paramedic link
+- **User model** - 4 roles, emergency profile, hospital/ambulance links
+- **Incident model** - full triage data, vitals, allocation scores, status machine (9 states)
+- **Hospital model** - capabilities, resources, queue status, geospatial index
+- **Ambulance model** - live location, status, equipment, paramedic link
 
 ### ✅ API Routes (Full REST)
 - `POST /api/auth/register|login`, `GET /api/auth/me`
-- `POST/GET/PATCH /api/incidents` — full CRUD with status machine
-- `GET/POST/PATCH /api/hospitals` — including resource and diversion updates
-- `GET/POST/PATCH /api/ambulances` — GPS location streaming via REST
-- `POST /api/ai/triage` — LLM triage with Groq fallback to OpenRouter
-- `POST /api/ai/allocation` — weighted hospital ranking
-- `POST /api/ai/route` — OSRM routing integration
-- `GET /api/ai/surge-forecast` — 24h surge prediction
+- `POST/GET/PATCH /api/incidents` - full CRUD with status machine
+- `GET/POST/PATCH /api/hospitals` - including resource and diversion updates
+- `GET/POST/PATCH /api/ambulances` - GPS location streaming via REST
+- `POST /api/ai/triage` - LLM triage with Groq fallback to OpenRouter
+- `POST /api/ai/allocation` - weighted hospital ranking
+- `POST /api/ai/route` - OSRM routing integration
+- `GET /api/ai/surge-forecast` - 24h surge prediction
 
 ### ✅ Socket.io Real-Time Layer
 - JWT-authenticated socket connections
@@ -92,7 +92,7 @@
 
 ---
 
-## 👨‍💻 NEIL — Dedicated Implementation Scope
+## 👨‍💻 NEIL - Dedicated Implementation Scope
 
 > **Note:** Each of Neil's features is a self-contained module. Integration points with Aryan's code are clearly defined below.
 
@@ -102,8 +102,8 @@
 **What it does:** Allows citizens to send "SOS" to a WhatsApp number and receive emergency management via chat.
 
 **Files to create:**
-- `server/src/routes/twilio.js` — Webhook handlers
-- `server/src/services/whatsapp.js` — Message templates + Twilio SDK
+- `server/src/routes/twilio.js` - Webhook handlers
+- `server/src/services/whatsapp.js` - Message templates + Twilio SDK
 - Add `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER` to `.env`
 
 **Implementation Guide:**
@@ -122,9 +122,9 @@ const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TO
 
 **Files to create:**
 - `server/src/routes/twilio.js`:
-  - `POST /api/twilio/voice` — Incoming call webhook (TwiML response)
-  - `POST /api/twilio/voice/recording` — Recording callback
-- `server/src/services/whisper.js` — Whisper transcription service
+  - `POST /api/twilio/voice` - Incoming call webhook (TwiML response)
+  - `POST /api/twilio/voice/recording` - Recording callback
+- `server/src/services/whisper.js` - Whisper transcription service
 
 ---
 

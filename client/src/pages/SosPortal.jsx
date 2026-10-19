@@ -166,7 +166,7 @@ export default function SosPortal() {
    * Wake the API as soon as the page opens.
    *
    * The backend runs on a free tier that sleeps after inactivity, and a cold
-   * start can take 40-50s — longer than the request timeout. The first report
+   * start can take 40-50s - longer than the request timeout. The first report
    * of the day was therefore failing at the submit step, which is the worst
    * possible moment. The caller spends 20-40s choosing a branch and answering
    * questions, so a cheap ping on mount means the service is warm by the time
@@ -877,7 +877,7 @@ function DescribeStep({
               : 'border-white/15 text-white/70 hover:border-white/35'
           }`}
         >
-          {transcribing ? 'Writing down what you said…' : recording ? 'Listening — release to stop' : 'Hold to speak'}
+          {transcribing ? 'Writing down what you said…' : recording ? 'Listening - release to stop' : 'Hold to speak'}
         </button>
       </div>
 
@@ -1006,7 +1006,7 @@ function ConfirmStep({
           <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/[0.08] p-4">
             <p className="text-sm font-semibold text-red-200">{sendError}</p>
             <p className="text-sm text-white/65 mt-1.5 leading-relaxed">
-              Press the button above to try again. If help is needed now, do not wait — call{' '}
+              Press the button above to try again. If help is needed now, do not wait - call{' '}
               {EMERGENCY_NUMBER}.
             </p>
             <a
@@ -1025,7 +1025,7 @@ function ConfirmStep({
         {submitting && !apiWarm && (
           <p className="text-sm text-white/50 mt-3 text-center leading-relaxed">
             Waking the dispatch service. This can take up to a minute the first
-            time — please stay on this page.
+            time - please stay on this page.
           </p>
         )}
       </div>
@@ -1179,7 +1179,7 @@ function ActiveReport({ incident, onCancel, onNew }) {
             onClick={onCancel}
             className="w-full rounded-2xl border border-white/15 hover:border-red-500/50 hover:text-red-300 py-3.5 font-semibold transition-colors"
           >
-            Help is no longer needed — cancel
+            Help is no longer needed - cancel
           </button>
         )}
       </div>

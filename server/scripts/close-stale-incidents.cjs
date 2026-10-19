@@ -9,8 +9,8 @@
  *
  * WHY THIS IS NEEDED:
  * An incident holds its assigned ambulance until it reaches COMPLETED or
- * CANCELLED. Any run that is abandoned part-way — a demo nobody closed, a
- * crashed process — leaves the unit marked DISPATCHED forever. Those units are
+ * CANCELLED. Any run that is abandoned part-way - a demo nobody closed, a
+ * crashed process - leaves the unit marked DISPATCHED forever. Those units are
  * then invisible to the dispatcher, which looks for status AVAILABLE, so the
  * fleet silently shrinks until no ambulance can be assigned at all and new
  * emergencies queue with no explanation.
@@ -19,7 +19,7 @@
  * inflate the ESI breakdown, and they feed the surge forecast.
  *
  * Nothing is deleted. Incidents are marked CANCELLED rather than COMPLETED,
- * because they were abandoned, not treated — COMPLETED would overstate the
+ * because they were abandoned, not treated - COMPLETED would overstate the
  * service's completion rate.
  * ==============================================================================
  */

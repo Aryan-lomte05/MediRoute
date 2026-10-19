@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * PUBLIC EMERGENCY REPORTING (/sos) — end-to-end UI
+ * PUBLIC EMERGENCY REPORTING (/sos) - end-to-end UI
  * ==============================================================================
  *
  * The highest-stakes surface in the product: anonymous, mobile, used under
@@ -12,7 +12,7 @@
 import { test, expect } from '@playwright/test'
 import { API, EMERGENCY_NUMBER, collectErrors, expectNoErrors, fillSosUpToConfirm } from './helpers.js'
 
-test.describe('SOS — entry screen', () => {
+test.describe('SOS - entry screen', () => {
   test('opens with no account and offers both reporting branches', async ({ page }) => {
     const errors = collectErrors(page)
     await page.goto('/sos')
@@ -50,7 +50,7 @@ test.describe('SOS — entry screen', () => {
   })
 })
 
-test.describe('SOS — self-report branch', () => {
+test.describe('SOS - self-report branch', () => {
   test('asks what is wrong in plain language, with no clinical jargon', async ({ page }) => {
     await page.goto('/sos')
     await page.getByRole('button', { name: /^i need help/i }).click()
@@ -87,7 +87,7 @@ test.describe('SOS — self-report branch', () => {
   })
 })
 
-test.describe('SOS — bystander branch', () => {
+test.describe('SOS - bystander branch', () => {
   test('asks only what an untrained person can observe', async ({ page }) => {
     await page.goto('/sos')
     await page.getByRole('button', { name: /someone else needs help/i }).click()
@@ -129,7 +129,7 @@ test.describe('SOS — bystander branch', () => {
   })
 })
 
-test.describe('SOS — location', () => {
+test.describe('SOS - location', () => {
   test('resolves the device location and shows a readable address', async ({ page }) => {
     await fillSosUpToConfirm(page, 'BYSTANDER')
 
@@ -146,7 +146,7 @@ test.describe('SOS — location', () => {
     await page.getByRole('button', { name: /road accident/i }).click()
     await page.getByRole('button', { name: /^continue$/i }).click()
 
-    // Either a fix arrived or the manual path is offered — never a dead end.
+    // Either a fix arrived or the manual path is offered - never a dead end.
     const manual = page.getByPlaceholder(/opposite bandra station/i)
     const found = page.getByText(/location found/i)
     await expect(manual.or(found)).toBeVisible()
@@ -169,7 +169,7 @@ test.describe('SOS — location', () => {
   })
 })
 
-test.describe('SOS — submission and live tracking', () => {
+test.describe('SOS - submission and live tracking', () => {
   let createdId = null
   let createdToken = null
 
@@ -251,7 +251,7 @@ test.describe('SOS — submission and live tracking', () => {
   })
 })
 
-test.describe('SOS — mobile ergonomics', () => {
+test.describe('SOS - mobile ergonomics', () => {
   test('has no horizontal scroll and uses large touch targets', async ({ page }) => {
     await page.goto('/sos')
 

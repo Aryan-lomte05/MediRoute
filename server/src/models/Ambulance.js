@@ -1,3 +1,30 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - AMBULANCE MODEL (models/Ambulance.js)
+ *
+ * WHAT IS WHERE:
+ * - vehicleNumber / vehicleType  Identity and capability tier
+ * - status                       Dispatch state machine, see below
+ * - currentLocation              GeoJSON Point, 2dsphere indexed
+ * - currentIncident              The job holding this unit
+ * - isSimulated                  Position is advanced by the server, not a crew
+ * - lastPing                     When a position was last written
+ *
+ * STATUS LIFECYCLE:
+ *   AVAILABLE -> DISPATCHED -> EN_ROUTE_TO_PATIENT -> AT_PATIENT
+ *             -> EN_ROUTE_TO_HOSPITAL -> AT_HOSPITAL -> AVAILABLE
+ *
+ * Only AVAILABLE units are considered by dispatch, so a unit left in any other
+ * state is effectively out of service. An incident holds its ambulance until it
+ * reaches COMPLETED or CANCELLED, which is why abandoned jobs shrink the fleet;
+ * scripts/close-stale-incidents.cjs releases them.
+ *
+ * WHO WRITES currentLocation:
+ * A crew device through PATCH /api/ambulances/:id/location, or
+ * services/unitSimulator.js when no crew is signed in. The simulator defers to a
+ * real device whenever lastPing is recent.
+ * ==============================================================================
+ */
 const mongoose = require('mongoose')
 
 const ambulanceSchema = new mongoose.Schema(

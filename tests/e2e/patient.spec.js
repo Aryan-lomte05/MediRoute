@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * SIGNED-IN CITIZEN PORTAL — end-to-end UI
+ * SIGNED-IN CITIZEN PORTAL - end-to-end UI
  * ==============================================================================
  */
 
@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
   await loginAs(page, 'patient')
 })
 
-test.describe('Patient — shell', () => {
+test.describe('Patient - shell', () => {
   test('loads and renders', async ({ page }) => {
     const errors = collectErrors(page)
     await page.goto('/patient')
@@ -34,7 +34,7 @@ test.describe('Patient — shell', () => {
   })
 })
 
-test.describe('Patient — every tab', () => {
+test.describe('Patient - every tab', () => {
   const tabs = [
     { name: /sos|emergency/i, expect: /sos|emergency|help/i },
     { name: /track/i, expect: /track|ambulance|status|no active/i },
@@ -60,7 +60,7 @@ test.describe('Patient — every tab', () => {
   }
 })
 
-test.describe('Patient — guidance and density', () => {
+test.describe('Patient - guidance and density', () => {
   test('simple mode keeps SOS and tracking only', async ({ page }) => {
     await page.goto('/patient')
     await page.waitForTimeout(3000)

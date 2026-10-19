@@ -1,4 +1,4 @@
-# MediRoute — Project Walkthrough ✅
+# MediRoute - Project Walkthrough ✅
 
 ## Live App Status
 
@@ -12,10 +12,10 @@
 
 ## Screenshots
 
-### Landing Page — Unboxed Seamless Gradient Flow Hero
+### Landing Page - Unboxed Seamless Gradient Flow Hero
 ![Landing page unboxed gradient flow hero](C:\Users\Aryan\.gemini\antigravity-ide\brain\5e62fb48-309e-4bd4-8a76-2ded9f0ee9b9\hero_section_gradient_1789835615419.png)
 
-### Portal Cards — High-Resolution AI Generated Imagery
+### Portal Cards - High-Resolution AI Generated Imagery
 ![Four high-res portal cards](C:\Users\Aryan\.gemini\antigravity-ide\brain\5e62fb48-309e-4bd4-8a76-2ded9f0ee9b9\portal_cards_centered_1789835714341.png)
 
 ### Workflow Section
@@ -30,13 +30,13 @@
 ### Admin Dashboard (with seeded data)
 ![Admin dashboard with stats and charts](C:\Users\Aryan\.gemini\antigravity-ide\brain\5e62fb48-309e-4bd4-8a76-2ded9f0ee9b9\admin_dashboard_seeded_1789831775936.png)
 
-### Admin — City Map
+### Admin - City Map
 ![Mapbox GL city map with hospital markers](C:\Users\Aryan\.gemini\antigravity-ide\brain\5e62fb48-309e-4bd4-8a76-2ded9f0ee9b9\admin_city_map_1789831806536.png)
 
-### Admin — Fleet Management
+### Admin - Fleet Management
 ![Fleet status with ambulance list and hospitals](C:\Users\Aryan\.gemini\antigravity-ide\brain\5e62fb48-309e-4bd4-8a76-2ded9f0ee9b9\admin_fleet_tab_1789831832447.png)
 
-### Admin — Surge Forecast
+### Admin - Surge Forecast
 ![12-hour surge prediction chart](C:\Users\Aryan\.gemini\antigravity-ide\brain\5e62fb48-309e-4bd4-8a76-2ded9f0ee9b9\admin_surge_tab_1789831857062.png)
 
 ---
@@ -110,7 +110,7 @@ Hey Neil! Here's what you need to implement:
    - 12 screens, complete design system
 
 All the backend integration points are already built by Aryan!
-API endpoints, Socket.io rooms, MongoDB schemas — all ready.
+API endpoints, Socket.io rooms, MongoDB schemas - all ready.
 ```
 
 ---

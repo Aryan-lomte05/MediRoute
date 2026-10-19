@@ -1,3 +1,26 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - AMBULANCE ROUTES (routes/ambulances.js)
+ *
+ * WHAT IS WHERE:
+ * - GET   /                List the fleet
+ * - GET   /my-ambulance    The vehicle assigned to the signed-in crew
+ * - GET   /:id             One vehicle
+ * - POST  /                Create                     admin
+ * - PATCH /:id/location    GPS telemetry              paramedic | admin
+ * - PATCH /:id/status      Dispatch state             paramedic | admin
+ * - POST  /seed            DESTRUCTIVE reseed         admin
+ *
+ * WHY THE WRITES ARE GUARDED:
+ * Position is what the patient tracking map and the command centre both trust, so
+ * anyone able to write it could spoof a unit's location. Status decides which
+ * vehicles dispatch will consider.
+ *
+ * PATCH /:id/location also refreshes lastPing, which is how
+ * services/unitSimulator.js knows a real crew is driving this vehicle and leaves
+ * it alone.
+ * ==============================================================================
+ */
 const express = require('express')
 const Ambulance = require('../models/Ambulance')
 const Incident = require('../models/Incident')
@@ -5,7 +28,7 @@ const { auth, authorize, optionalAuth } = require('../middleware/auth')
 
 const router = express.Router()
 
-// GET /api/ambulances — List all ambulances
+// GET /api/ambulances - List all ambulances
 router.get('/', optionalAuth, async (req, res, next) => {
   try {
     const { status, lat, lng, radius = 50000 } = req.query
@@ -34,7 +57,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
   }
 })
 
-// GET /api/ambulances/my-ambulance — Get ambulance assigned to current paramedic or active lead unit
+// GET /api/ambulances/my-ambulance - Get ambulance assigned to current paramedic or active lead unit
 router.get('/my-ambulance', optionalAuth, async (req, res, next) => {
   try {
     let ambulance = null
@@ -85,7 +108,7 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
   }
 })
 
-// POST /api/ambulances — Create ambulance (admin)
+// POST /api/ambulances - Create ambulance (admin)
 router.post('/', auth, authorize('admin'), async (req, res, next) => {
   try {
     const ambulance = await Ambulance.create(req.body)
@@ -95,7 +118,7 @@ router.post('/', auth, authorize('admin'), async (req, res, next) => {
   }
 })
 
-// PATCH /api/ambulances/:id/location — Update GPS telemetry
+// PATCH /api/ambulances/:id/location - Update GPS telemetry
 // Staff-only: this is the position the patient tracking map and the command
 // centre both trust. Anyone able to write it could spoof a unit's location.
 router.patch('/:id/location', auth, authorize('paramedic', 'admin'), async (req, res, next) => {
@@ -134,7 +157,7 @@ router.patch('/:id/location', auth, authorize('paramedic', 'admin'), async (req,
   }
 })
 
-// PATCH /api/ambulances/:id/status — Update status
+// PATCH /api/ambulances/:id/status - Update status
 // Staff-only: status decides which units are dispatchable.
 router.patch('/:id/status', auth, authorize('paramedic', 'admin'), async (req, res, next) => {
   try {
@@ -157,7 +180,7 @@ router.patch('/:id/status', auth, authorize('paramedic', 'admin'), async (req, r
   }
 })
 
-// POST /api/ambulances/seed — Seed sample ambulances
+// POST /api/ambulances/seed - Seed sample ambulances
 // Admin-only and destructive: deletes the whole fleet before inserting.
 router.post('/seed', auth, authorize('admin'), async (req, res, next) => {
   try {

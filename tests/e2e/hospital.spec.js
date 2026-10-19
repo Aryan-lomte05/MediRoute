@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * HOSPITAL ER CONSOLE — end-to-end UI
+ * HOSPITAL ER CONSOLE - end-to-end UI
  * ==============================================================================
  */
 
@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
   await loginAs(page, 'hospital')
 })
 
-test.describe('Hospital — shell', () => {
+test.describe('Hospital - shell', () => {
   test('loads without bouncing to login and renders live content', async ({ page }) => {
     const errors = collectErrors(page)
     await page.goto('/hospital')
@@ -43,7 +43,7 @@ test.describe('Hospital — shell', () => {
   })
 })
 
-test.describe('Hospital — every tab', () => {
+test.describe('Hospital - every tab', () => {
   const tabs = [
     { name: /inbound queue/i, expect: /bay board|inbound|bay \d/i },
     { name: /resource & blood inventory/i, expect: /blood bank|ventilator/i },
@@ -65,7 +65,7 @@ test.describe('Hospital — every tab', () => {
   }
 })
 
-test.describe('Hospital — live resources', () => {
+test.describe('Hospital - live resources', () => {
   test('blood stock reads from the database and ordering persists', async ({ page }) => {
     await page.goto('/hospital')
     await page.waitForTimeout(2500)
@@ -118,7 +118,7 @@ test.describe('Hospital — live resources', () => {
   })
 })
 
-test.describe('Hospital — guidance and density', () => {
+test.describe('Hospital - guidance and density', () => {
   test('simple mode hides the specialist views and explains the screen', async ({ page }) => {
     await page.goto('/hospital')
     await page.waitForTimeout(2500)

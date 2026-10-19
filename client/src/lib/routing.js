@@ -1,3 +1,21 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - PRE-FETCHED ROAD GEOMETRY (lib/routing.js)
+ *
+ * WHAT IS WHERE:
+ * - PREFETCHED_TRAFFIC_ROUTES  Named Mumbai corridors used by the map overlays
+ * - PARAMEDIC_REAL_ROUTE       The corridor drawn on the field console
+ *
+ * WHY THIS IS STATIC:
+ * These are real road coordinates captured from OSRM once, not invented points.
+ * They exist so the decorative map corridors on the landing page and the portal
+ * backgrounds render instantly without an API call on every page load.
+ *
+ * NOT USED FOR DISPATCH. Live routing is server-side: POST /api/ai/route calls
+ * OSRM, and services/unitSimulator.js fetches fresh geometry per leg. Nothing a
+ * crew or a patient relies on is read from this file.
+ * ==============================================================================
+ */
 // Auto-generated real-road coordinates via Mapbox driving-traffic API
 // All coordinates snap 100% to actual Mumbai roads, highways, and flyovers
 

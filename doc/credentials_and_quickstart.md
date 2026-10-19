@@ -1,4 +1,4 @@
-# MediRoute — Credentials & Quickstart Guide
+# MediRoute - Credentials & Quickstart Guide
 
 ## 🔐 Pre-Configured Demo Credentials
 
@@ -62,7 +62,7 @@ Open your browser to:
 1. Log in with **Paramedic** (`paramedic@mediroute.com` / `paramedic123`).
 2. View the incoming emergency dispatch card.
 3. Check the **"Navigate"** tab to view the illuminated 3D route and turn-by-turn directions.
-4. Open the **"Vitals"** panel, enter patient vitals (Heart Rate, SpO2, BP), and click **"Transmit Vitals"** — watch it stream in real time to the Hospital ER!
+4. Open the **"Vitals"** panel, enter patient vitals (Heart Rate, SpO2, BP), and click **"Transmit Vitals"** - watch it stream in real time to the Hospital ER!
 
 ### 4. Hospital ER Trauma Bay Testing (`/hospital`)
 1. Log in with **Hospital Staff** (`hospital@mediroute.com` / `hospital123`).

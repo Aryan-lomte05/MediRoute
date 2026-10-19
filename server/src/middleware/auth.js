@@ -1,3 +1,24 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - AUTHENTICATION MIDDLEWARE (middleware/auth.js)
+ *
+ * WHAT IS WHERE:
+ * - auth           Requires a valid token; rejects with 401 otherwise
+ * - authorize(...) Requires one of the listed roles; rejects with 403
+ * - optionalAuth   Attaches the user when a token is present, never rejects
+ *
+ * WHICH TO USE:
+ * Use `auth` plus `authorize` on anything that writes, and on any read that
+ * returns data across patients. Use `optionalAuth` only where an anonymous
+ * citizen must be able to act: creating an emergency report, reading public
+ * hospital data, and triage.
+ *
+ * Routes guarded this way are listed in each route file's own header. The
+ * tracking token that lets an anonymous reporter follow their own incident is
+ * checked inside routes/incidents.js, not here, because it grants access to one
+ * record rather than establishing a session.
+ * ==============================================================================
+ */
 const jwt = require('jsonwebtoken')
 const User = require('../models/User')
 

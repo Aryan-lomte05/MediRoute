@@ -86,7 +86,7 @@ app.use('/api/ai/voice-triage', rateLimit({ windowMs: 10 * 60 * 1000, max: 15 })
 
 /**
  * Emergency reporting is deliberately public, which means it needs abuse
- * protection — but throttling a genuine emergency is far worse than absorbing
+ * protection - but throttling a genuine emergency is far worse than absorbing
  * some junk. The ceiling is therefore set well above plausible real use (a
  * person reporting one incident, retrying a few times on a bad connection)
  * and only applies to creation, never to tracking an existing report.
@@ -139,7 +139,7 @@ app.set('io', io)
  * /ambulances/:id/location. Without that, an assigned unit never moved: the
  * patient's tracking map showed a vehicle parked at its base, the ETA never
  * counted down, and the job stayed DISPATCHED because nothing advanced it.
- * A real device always wins — see RECENT_PING_MS in the service.
+ * A real device always wins - see RECENT_PING_MS in the service.
  */
 startUnitSimulator(io)
 

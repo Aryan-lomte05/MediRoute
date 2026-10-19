@@ -277,15 +277,33 @@ function clinicalRuleTriage(complaintText = '', vitals = {}) {
 // PUBLIC API
 // ──────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Normalise the punctuation a model emits.
+ *
+ * Language models reach for em dashes, en dashes and non-breaking hyphens, all
+ * of which end up rendered verbatim in clinical summaries and in the
+ * recommended actions shown to citizens. The house style is a plain hyphen, so
+ * model output is normalised here rather than at every display site.
+ */
+function cleanText(value) {
+  return String(value)
+    .replace(/\s[—–]\s/g, ' - ')
+    .replace(/[—–‒―‑]/g, '-')
+    // Smart quotes travel with them and break monospaced clinical text.
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .trim()
+}
+
 /** Clamp and sanitise a model triage payload into the Incident schema shape. */
 function normaliseTriage(raw, engine) {
   const esi = parseInt(raw.esiLevel, 10)
   const confidence = parseFloat(raw.aiConfidence)
-  const asArray = (val) => (Array.isArray(val) ? val.filter(Boolean).map(String) : [])
+  const asArray = (val) => (Array.isArray(val) ? val.filter(Boolean).map((v) => cleanText(v)) : [])
 
   return {
     esiLevel: Number.isFinite(esi) ? Math.min(5, Math.max(1, esi)) : 3,
-    aiSummary: String(raw.aiSummary || 'Clinical summary unavailable.').slice(0, 600),
+    aiSummary: cleanText(raw.aiSummary || 'Clinical summary unavailable.').slice(0, 600),
     aiConfidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0.8,
     // Keep only specialties the allocation engine can actually act on.
     requiredSpecialties: asArray(raw.requiredSpecialties)
@@ -448,7 +466,7 @@ async function transcribeAudio(audioBuffer, filename = 'audio.webm') {
     timeout: 30000,
   })
 
-  return { text: (res.data?.text || '').trim(), engine: `groq:${AUDIO_MODEL}` }
+  return { text: cleanText(res.data?.text || ''), engine: `groq:${AUDIO_MODEL}` }
 }
 
 /**

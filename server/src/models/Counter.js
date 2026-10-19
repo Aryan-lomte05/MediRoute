@@ -10,7 +10,7 @@ const mongoose = require('mongoose')
  *
  *   1. Concurrency. Two reports arriving together both read the same count and
  *      derive the same number. The unique index then rejects one of them with a
- *      500 — an emergency report dropped because another arrived at the same
+ *      500 - an emergency report dropped because another arrived at the same
  *      moment.
  *
  *   2. Deletion. Removing any incident lowers the count, so the next number

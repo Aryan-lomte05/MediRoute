@@ -1,10 +1,35 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - HOSPITAL ROUTES (routes/hospitals.js)
+ *
+ * WHAT IS WHERE:
+ * - GET   /                  List hospitals            PUBLIC
+ * - GET   /primary           The signed-in staff hospital
+ * - GET   /:id               One hospital              PUBLIC
+ * - POST  /                  Create                    admin
+ * - PATCH /:id/resources     Bed and ventilator counts hospital_staff | admin
+ * - PATCH /:id/diversion     Divert on or off          hospital_staff | admin
+ * - PATCH /:id/blood         Blood stock, relative     hospital_staff | admin
+ * - PATCH /:id/bays/:number  One resuscitation bay     hospital_staff | admin
+ * - POST  /seed              DESTRUCTIVE reseed        admin
+ *
+ * WHY THE WRITES ARE GUARDED:
+ * Bed availability and diversion state drive ambulance allocation across the
+ * whole city, so an unauthenticated writer here could redirect real dispatches.
+ * /seed deletes every hospital before inserting and was previously reachable
+ * without a session.
+ *
+ * BLOOD STOCK USES $inc, not an absolute set, so two staff members receiving
+ * units at the same time cannot overwrite each other with a stale figure.
+ * ==============================================================================
+ */
 const express = require('express')
 const Hospital = require('../models/Hospital')
 const { auth, authorize, optionalAuth } = require('../middleware/auth')
 
 const router = express.Router()
 
-// GET /api/hospitals — List all hospitals (with optional geo filter)
+// GET /api/hospitals - List all hospitals (with optional geo filter)
 router.get('/', optionalAuth, async (req, res, next) => {
   try {
     const { lat, lng, radius = 30000, capabilities } = req.query
@@ -31,7 +56,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
   }
 })
 
-// GET /api/hospitals/primary — Get primary / staff hospital
+// GET /api/hospitals/primary - Get primary / staff hospital
 router.get('/primary', optionalAuth, async (req, res, next) => {
   try {
     let hospital = null
@@ -59,7 +84,7 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
   }
 })
 
-// POST /api/hospitals — Create hospital (admin only)
+// POST /api/hospitals - Create hospital (admin only)
 router.post('/', auth, authorize('admin'), async (req, res, next) => {
   try {
     const hospital = await Hospital.create(req.body)
@@ -69,7 +94,7 @@ router.post('/', auth, authorize('admin'), async (req, res, next) => {
   }
 })
 
-// PATCH /api/hospitals/:id/resources — Update bed/resource counts
+// PATCH /api/hospitals/:id/resources - Update bed/resource counts
 // Staff-only: bed availability drives live ambulance allocation across the city,
 // so an unauthenticated writer here could redirect real dispatches.
 router.patch('/:id/resources', auth, authorize('hospital_staff', 'admin'), async (req, res, next) => {
@@ -95,7 +120,7 @@ router.patch('/:id/resources', auth, authorize('hospital_staff', 'admin'), async
   }
 })
 
-// PATCH /api/hospitals/:id/diversion — Toggle diversion status
+// PATCH /api/hospitals/:id/diversion - Toggle diversion status
 // Staff-only: diverting a hospital removes it from allocation city-wide.
 router.patch('/:id/diversion', auth, authorize('hospital_staff', 'admin'), async (req, res, next) => {
   try {
@@ -120,7 +145,7 @@ router.patch('/:id/diversion', auth, authorize('hospital_staff', 'admin'), async
   }
 })
 
-// PATCH /api/hospitals/:id/blood — Adjust blood bank stock
+// PATCH /api/hospitals/:id/blood - Adjust blood bank stock
 // Body: { component: 'oNeg'|'plasma'|…, delta: number } for a relative change,
 // or { bloodBank: {…} } to set several counts at once.
 // Relative changes are the normal path: two staff members receiving units at
@@ -177,7 +202,7 @@ router.patch('/:id/blood', auth, authorize('hospital_staff', 'admin'), async (re
   }
 })
 
-// PATCH /api/hospitals/:id/bays/:number — Update one resuscitation bay
+// PATCH /api/hospitals/:id/bays/:number - Update one resuscitation bay
 router.patch('/:id/bays/:number', auth, authorize('hospital_staff', 'admin'), async (req, res, next) => {
   try {
     const { status, label, doctor, incident } = req.body
@@ -227,7 +252,7 @@ router.patch('/:id/bays/:number', auth, authorize('hospital_staff', 'admin'), as
   }
 })
 
-// POST /api/hospitals/seed — Seed sample Mumbai hospitals
+// POST /api/hospitals/seed - Seed sample Mumbai hospitals
 // Admin-only and destructive: this deletes every hospital before inserting.
 // It was previously reachable unauthenticated, meaning any caller on the
 // internet could empty the collection.

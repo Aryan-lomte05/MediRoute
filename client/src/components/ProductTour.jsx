@@ -342,7 +342,7 @@ function SceneProfessionals() {
       ))}
       <Rise delay={0.9}>
         <p className="text-center text-[11px] font-mono text-white/35 pt-1">
-          these need a staff login — the emergency page never does
+          these need a staff login - the emergency page never does
         </p>
       </Rise>
     </div>
@@ -386,7 +386,7 @@ const CHAPTERS = [
     id: 'bystander',
     title: 'If it is someone else',
     caption:
-      'Helping a stranger is different: you will not know their blood group. So you are only asked what anyone can see — are they awake, are they breathing, how many are hurt. “Not sure” is a perfectly good answer.',
+      'Helping a stranger is different: you will not know their blood group. So you are only asked what anyone can see - are they awake, are they breathing, how many are hurt. “Not sure” is a perfectly good answer.',
     ms: 11000,
     Scene: SceneBystander,
   },
@@ -394,7 +394,7 @@ const CHAPTERS = [
     id: 'triage',
     title: 'How urgency is decided',
     caption:
-      'A clinical AI reads your description and decides how serious it is. That decision picks the type of crew and the kind of hospital — a cardiac case goes somewhere with a cath lab, not merely to the closest building.',
+      'A clinical AI reads your description and decides how serious it is. That decision picks the type of crew and the kind of hospital - a cardiac case goes somewhere with a cath lab, not merely to the closest building.',
     ms: 11000,
     Scene: SceneTriage,
   },

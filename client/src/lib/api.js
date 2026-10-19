@@ -33,14 +33,14 @@ function readStoredToken() {
   }
 }
 
-// Request interceptor — attach the token when the user has a session.
+// Request interceptor - attach the token when the user has a session.
 api.interceptors.request.use((config) => {
   const token = readStoredToken()
   if (token) config.headers['Authorization'] = `Bearer ${token}`
   return config
 })
 
-// Response interceptor — handle an expired session.
+// Response interceptor - handle an expired session.
 api.interceptors.response.use(
   (res) => res,
   (err) => {

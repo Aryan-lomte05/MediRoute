@@ -1,4 +1,4 @@
-# MediRoute — ChatGPT UI/UX Prompting System
+# MediRoute - ChatGPT UI/UX Prompting System
 
 ## Structured Prompt Engineering for AI Image & UI Concept Generation
 
@@ -90,8 +90,8 @@ Generate a mobile/tablet PWA interface UI mockup for the "Paramedic Emergency Fi
 
 Layout and Structure:
 1. Navigation & Route Header:
-   - Top banner showing destination hospital: "Lilavati Trauma Center — Bay 03".
-   - Giant countdown timer: "ETA: 06:45 MIN", Distance: "3.2 KM", Green Corridor Status: "ACTIVE — Signals Synchronized".
+   - Top banner showing destination hospital: "Lilavati Trauma Center - Bay 03".
+   - Giant countdown timer: "ETA: 06:45 MIN", Distance: "3.2 KM", Green Corridor Status: "ACTIVE - Signals Synchronized".
    - Turn-by-turn prompt: "In 300m, keep left on Western Express Flyover (Corridor Priority Open)".
 2. Interactive Route Mini-Map:
    - Centered GPS navigation view showing ambulance marker advancing along an illuminated emergency green route with traffic congestion cleared ahead.
@@ -126,11 +126,11 @@ Generate a widescreen desktop command dashboard UI mockup for the "Hospital Emer
 
 Layout and Structure:
 1. Hospital Status Top Header:
-   - Hospital Name: "KEM Hospital — Level 1 Trauma Center".
+   - Hospital Name: "KEM Hospital - Level 1 Trauma Center".
    - Real-time Capacity Badges: "ICU Beds: 3/18 Available", "ER Beds: 8/30 Available", "OR Suites: 1 Free", "Trauma Teams: 2 On-Duty".
    - Diversion Toggle Switch: "Intake Status: NORMAL (Accepting All Critical Dispatches)".
 2. Inbound Ambulance Priority Alert Banner (Flashing Top Notification):
-   - Urgent incoming banner: "🚨 INBOUND CRITICAL AMBULANCE — UNIT EMS-102 — ETA 4 MIN".
+   - Urgent incoming banner: "🚨 INBOUND CRITICAL AMBULANCE - UNIT EMS-102 - ETA 4 MIN".
    - Patient Summary: 42yo Male, ESI Level 1, Penetrating Chest Trauma, GCS 11, Hypotensive.
    - Assigned Trauma Bay: "Bay 01 Pre-Assigned".
 3. Live Inbound Ambulances Tracker (Split Screen Left):
@@ -166,7 +166,7 @@ Layout and Structure:
    - Quick Emergency Type selector pills: "Cardiac / Chest Pain", "Severe Road Accident", "Unconscious", "Fire / Burn", "Other Trauma".
    - Alternate Intake options: "💬 Open WhatsApp Emergency Bot", "📞 Automated Voice Intake Call".
 2. Live Tracking Screen (State 2 - Post-Dispatch):
-   - Top Status Card: "Ambulance Dispatched & En Route — Unit EMS-104".
+   - Top Status Card: "Ambulance Dispatched & En Route - Unit EMS-104".
    - Prominent ETA Counter: "Arriving in 04:30 MIN".
    - Interactive Live Map: Showing user's location pin and the approaching 3D ambulance icon moving in real-time along the fastest route.
    - Paramedic Team Card: Paramedic Name, Vehicle Number, Direct Emergency Call button.
@@ -195,10 +195,10 @@ Generate an executive analytics dashboard UI mockup for the "AI Surge Forecastin
 Layout and Structure:
 1. Forecast Timeline & Risk Horizon (Top 12-Hour Area Chart):
    - Dual-axis time-series visualization displaying "Predicted Incident Volume" vs "Historical Baseline" across the next 12 hours.
-   - Highlighted peak risk period: Shaded red danger zone between "18:00 - 21:00 (Evening Traffic Peak — 94% Projected Capacity)".
+   - Highlighted peak risk period: Shaded red danger zone between "18:00 - 21:00 (Evening Traffic Peak - 94% Projected Capacity)".
    - AI Model Confidence indicator badge: "Temporal Fusion Transformer (TFT) · 92.4% Confidence".
 2. City Staging Optimization Recommendations (Middle Left):
-   - Proactive repositioning prompt cards: "Move Unit EMS-102 from Dadar Depot to Bandra Junction — reduces anticipated response lag by 3.8 minutes during forecast surge."
+   - Proactive repositioning prompt cards: "Move Unit EMS-102 from Dadar Depot to Bandra Junction - reduces anticipated response lag by 3.8 minutes during forecast surge."
    - 1-click execution button: "Approve Fleet Staging Plan".
 3. Spatial Heatmap Analysis (Middle Right):
    - Choropleth density map showing city districts color-coded by predicted emergency load (Green: Low, Amber: Moderate, Red: Critical Surge).

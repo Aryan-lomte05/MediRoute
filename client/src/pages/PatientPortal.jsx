@@ -67,7 +67,7 @@ const FIRST_AID_TOPICS = [
     steps: [
       'Apply firm, direct pressure with clean cloth or sterile gauze directly over the wound.',
       'Maintain continuous pressure for at least 5 minutes without lifting the cloth to check.',
-      'If blood soaks through, add another layer on top — do NOT remove the first dressing.',
+      'If blood soaks through, add another layer on top - do NOT remove the first dressing.',
       'If bleeding from limb does not stop, apply a commercial tourniquet 2-3 inches above wound.',
       'Keep patient warm, lying down, with feet elevated if in shock.',
     ],

@@ -1,3 +1,20 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - DATABASE CONNECTION (config/db.js)
+ *
+ * WHAT IS WHERE:
+ * - connectDB()  Connects once and ensures the geospatial indexes exist
+ *
+ * WHY THE INDEXES ARE CREATED HERE:
+ * Dispatch selects the nearest free ambulance with a $nearSphere query, and
+ * hospital allocation measures distance from the patient. Both require a
+ * 2dsphere index; without one MongoDB refuses the query outright and the
+ * dispatch pipeline silently falls back to "any available unit". Creating them
+ * on boot means a fresh database is dispatchable immediately.
+ *
+ * The guard flag prevents a second connection if this is called twice.
+ * ==============================================================================
+ */
 const mongoose = require('mongoose')
 
 let isConnected = false

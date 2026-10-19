@@ -1,3 +1,22 @@
+/**
+ * ==============================================================================
+ * MEDIROUTE - AUTHENTICATION ROUTES (routes/auth.js)
+ *
+ * WHAT IS WHERE:
+ * - POST /register   Create an account
+ * - POST /login      Exchange credentials for a JWT
+ * - GET  /me         The signed-in user
+ * - PATCH /profile   Update the citizen emergency profile
+ *
+ * DEMO ACCOUNTS: the four evaluation logins are provisioned on first boot if they
+ * do not already exist, so a fresh database is usable without a seeding step.
+ *
+ * RATE LIMIT: this router sits behind a stricter limiter than the rest of the API
+ * (20 attempts per 15 minutes, see src/index.js) because it is the credential
+ * surface. The limiter is in memory, so restarting the server clears it, which
+ * matters when running the test suites repeatedly.
+ * ==============================================================================
+ */
 const express = require('express')
 const jwt = require('jsonwebtoken')
 const User = require('../models/User')

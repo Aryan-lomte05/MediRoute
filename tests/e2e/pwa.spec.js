@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * PWA INSTALLABILITY AND OFFLINE BEHAVIOUR — end-to-end
+ * PWA INSTALLABILITY AND OFFLINE BEHAVIOUR - end-to-end
  * ==============================================================================
  *
  * The emergency page is the one surface that must survive a bad connection, so
@@ -11,7 +11,7 @@
 
 import { test, expect } from '@playwright/test'
 
-test.describe('PWA — manifest', () => {
+test.describe('PWA - manifest', () => {
   test('is linked, valid, and starts on the emergency page', async ({ page, request }) => {
     await page.goto('/sos')
 
@@ -72,7 +72,7 @@ test.describe('PWA — manifest', () => {
   })
 })
 
-test.describe('PWA — service worker', () => {
+test.describe('PWA - service worker', () => {
   test('registers and becomes active', async ({ page }) => {
     await page.goto('/sos')
 
@@ -126,7 +126,7 @@ test.describe('PWA — service worker', () => {
   })
 })
 
-test.describe('PWA — mobile rendering', () => {
+test.describe('PWA - mobile rendering', () => {
   test('the emergency page fits a phone with no sideways scroll', async ({ page }) => {
     await page.goto('/sos')
 

@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * CITY COMMAND CENTRE (ADMIN) — end-to-end UI
+ * CITY COMMAND CENTRE (ADMIN) - end-to-end UI
  * ==============================================================================
  */
 
@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
   await loginAs(page, 'admin')
 })
 
-test.describe('Admin — shell', () => {
+test.describe('Admin - shell', () => {
   test('loads and renders live operational content', async ({ page }) => {
     const errors = collectErrors(page)
     await page.goto('/admin')
@@ -53,7 +53,7 @@ test.describe('Admin — shell', () => {
   })
 })
 
-test.describe('Admin — every view', () => {
+test.describe('Admin - every view', () => {
   const views = [
     { name: /3d tactical gis/i, expect: /incident|unit|hospital|live/i },
     { name: /fleet operations/i, expect: /MH-AMB|vehicle|fleet/i },
@@ -77,7 +77,7 @@ test.describe('Admin — every view', () => {
   }
 })
 
-test.describe('Admin — forecast honesty', () => {
+test.describe('Admin - forecast honesty', () => {
   test('surge confidence is a sane percentage, not a multiplied value', async ({ page }) => {
     await page.goto('/admin')
     await page.waitForTimeout(4000)
@@ -93,7 +93,7 @@ test.describe('Admin — forecast honesty', () => {
   })
 })
 
-test.describe('Admin — guidance and density', () => {
+test.describe('Admin - guidance and density', () => {
   test('simple mode hides the specialist views', async ({ page }) => {
     await page.goto('/admin')
     await page.waitForTimeout(4000)

@@ -1,4 +1,4 @@
-# MediRoute — Technical Project Documentation
+# MediRoute - Technical Project Documentation
 ### Next-Gen Intelligent Emergency Response & Dynamic Hospital Allocation System
 **Academic Year:** 2026 | **Evaluation:** Mini Project (Max 10 Marks)
 
@@ -11,9 +11,9 @@ Emergency Medical Services (EMS) globally suffer from four critical bottlenecks:
 1. **Fragmented communication** between patients, paramedics, and hospitals
 2. **Static vehicle routing** that ignores live traffic conditions
 3. **No real-time hospital bed visibility** during active dispatch
-4. **Manual emergency triage** — slow, inconsistent, and error-prone
+4. **Manual emergency triage** - slow, inconsistent, and error-prone
 
-These bottlenecks cause delayed response times, ambulances arriving at overcrowded hospitals, and high mortality rates during the critical **"Golden Hour"** — the first 60 minutes after a traumatic injury.
+These bottlenecks cause delayed response times, ambulances arriving at overcrowded hospitals, and high mortality rates during the critical **"Golden Hour"** - the first 60 minutes after a traumatic injury.
 
 ### 1.2 Solution
 **MediRoute** is an end-to-end, real-time emergency response platform built on the **MERN Stack** (MongoDB, Express, React, Node.js) with a multi-agent AI ecosystem that:
@@ -25,7 +25,7 @@ These bottlenecks cause delayed response times, ambulances arriving at overcrowd
 ### 1.3 Key Metrics (Target)
 | Metric | Traditional EMS | MediRoute Target |
 |---|---|---|
-| Average dispatch time | 4–8 minutes | **< 8 seconds** |
+| Average dispatch time | 4-8 minutes | **< 8 seconds** |
 | AI triage accuracy | Manual (~70%) | **94%** |
 | Hospital allocation time | Manual | **< 3 seconds** |
 | Expected mortality reduction | Baseline | **37%** |
@@ -93,7 +93,7 @@ These bottlenecks cause delayed response times, ambulances arriving at overcrowd
 
 ## 4. AI Engine Modules
 
-### Module A — AI Voice Triage Agent
+### Module A - AI Voice Triage Agent
 **What it does:** Converts emergency speech/text into a structured clinical assessment within 3 seconds.
 
 **How it works:**
@@ -101,7 +101,7 @@ These bottlenecks cause delayed response times, ambulances arriving at overcrowd
 2. Browser's Web Speech API OR Groq Whisper API transcribes audio → text
 3. Prompt sent to **Groq gpt-oss-120b** (free tier)
 4. LLM extracts: chief complaint, age, consciousness, bleeding severity, respiratory status
-5. Returns **ESI 1–5 score** (Emergency Severity Index) + required specialties + confidence
+5. Returns **ESI 1-5 score** (Emergency Severity Index) + required specialties + confidence
 
 **ESI Levels:**
 - ESI 1: Immediate life threat (cardiac arrest, major trauma)
@@ -112,7 +112,7 @@ These bottlenecks cause delayed response times, ambulances arriving at overcrowd
 
 ---
 
-### Module B — Multi-Objective Hospital Allocation Engine
+### Module B - Multi-Objective Hospital Allocation Engine
 **What it does:** Ranks all nearby hospitals using a weighted optimization formula.
 
 **Formula:**
@@ -134,7 +134,7 @@ Where:
 
 ---
 
-### Module C — Dynamic Green-Corridor Route Optimizer
+### Module C - Dynamic Green-Corridor Route Optimizer
 **What it does:** Finds the fastest, congestion-avoiding route for the ambulance.
 
 **How it works:**
@@ -145,8 +145,8 @@ Where:
 
 ---
 
-### Module D — Surge Capacity Forecasting
-**What it does:** Predicts hospital patient load 6–24 hours ahead.
+### Module D - Surge Capacity Forecasting
+**What it does:** Predicts hospital patient load 6-24 hours ahead.
 
 **How it works:**
 1. Sinusoidal time-series model simulates realistic demand patterns

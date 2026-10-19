@@ -835,7 +835,7 @@ export default function AdminPortal() {
           >
             <span className="text-sm">🔔</span>
             <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#FF2D4A] text-[9px] font-bold font-mono flex items-center justify-center text-white">
-              {stats?.esiCounts?.esi1 ?? '—'}
+              {stats?.esiCounts?.esi1 ?? '-'}
             </span>
           </button>
 
@@ -1338,7 +1338,7 @@ export default function AdminPortal() {
                       <div className="space-y-2 font-mono text-xs">
                         <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
                           <div className="text-white/40 text-[10px]">Peak Surge Window</div>
-                          <div className="text-red-400 font-bold text-sm">22:00 – 23:30 IST</div>
+                          <div className="text-red-400 font-bold text-sm">22:00 - 23:30 IST</div>
                         </div>
                         <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
                           <div className="text-white/40 text-[10px]">High-Volume Corridors</div>
@@ -1750,7 +1750,7 @@ export default function AdminPortal() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-lg">
                 <div className="text-[10px] font-mono text-white/40 uppercase">Peak Surge Window</div>
-                <div className="text-2xl font-extrabold text-red-400 mt-1 font-mono">22:00 – 23:30</div>
+                <div className="text-2xl font-extrabold text-red-400 mt-1 font-mono">22:00 - 23:30</div>
                 <div className="text-[10px] text-white/50 mt-0.5">Estimated +38% incident volume</div>
               </div>
 
@@ -1956,10 +1956,10 @@ export default function AdminPortal() {
               <div className="text-[10px] font-mono text-white/40 uppercase tracking-wider">Hospital Bed Utilization</div>
               <div className="flex items-baseline justify-between">
                 <span className="text-2xl font-extrabold text-white tracking-tight">
-                  {stats?.beds?.utilizationRate ?? '—'}%
+                  {stats?.beds?.utilizationRate ?? '-'}%
                 </span>
                 <span className="text-[10px] font-mono text-white/50">
-                  {stats?.beds?.occupied ?? '—'} / {stats?.beds?.total ?? '—'} ER Beds
+                  {stats?.beds?.occupied ?? '-'} / {stats?.beds?.total ?? '-'} ER Beds
                 </span>
               </div>
               <div className="mt-1 h-2 w-full bg-white/10 rounded-full overflow-hidden">
@@ -1981,7 +1981,7 @@ export default function AdminPortal() {
               <div className="flex items-baseline justify-between">
                 <div className="flex items-baseline gap-2">
                   <span className="text-2xl font-extrabold text-white tracking-tight">
-                    {stats?.avgDispatchSeconds != null ? `${stats.avgDispatchSeconds}s` : '—'}
+                    {stats?.avgDispatchSeconds != null ? `${stats.avgDispatchSeconds}s` : '-'}
                   </span>
                   <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
                     <span>↓ 32%</span>

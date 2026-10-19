@@ -1,96 +1,99 @@
 # MediRoute tests
 
-Three suites that exercise the real stack — the live database, the live Groq
-models and a real browser. There is no mocking: a pass here means the feature
-genuinely works end to end.
+Everything here runs against the real stack - live database, live Groq models,
+real browser. Nothing is mocked, so a pass means the feature genuinely works.
 
-| Suite | What it covers | Checks |
-|:---|:---|:---:|
-| `api-e2e.sh` | API, dispatch pipeline, access control | 47 |
-| `browser-sos.cjs` | The public reporting flow in a real browser | 22 |
-| `browser-portals.cjs` | Landing, walkthrough, three staff portals | 30 |
+| Suite | What it covers | Runner |
+|:---|:---|:---|
+| `e2e/*.spec.js` | Every screen, tab and control, end to end | Playwright |
+| `api-e2e.sh` | API, dispatch pipeline, access control (47 checks) | bash + curl |
+| `browser-sos.cjs` | Public reporting flow (22 checks) | raw CDP |
+| `browser-portals.cjs` | Landing and the three staff portals (30 checks) | raw CDP |
 
-## Prerequisites
-
-- The API running on `http://localhost:5000` (`cd server && npm run dev`).
-- For the browser suites, the built client being served, and a Chromium binary.
-  `npx playwright install chromium` provides one if you have no Chrome.
+The Playwright suite supersedes the two `browser-*.cjs` scripts, which are kept
+because they need no dependencies and are useful when Playwright's browsers are
+not installed.
 
 ## Running
 
 ```bash
-# 1. API and pipeline
-bash tests/api-e2e.sh
+# One-time
+npx playwright install chromium
 
-# 2. Build and serve the client
-cd client && npm run build && npx vite preview --port 4173 --strictPort &
+# The API must be running
+cd server && npm run dev
 
-# 3. Start a browser with the DevTools protocol exposed
-#    (adjust the path to any Chrome or Chromium build)
-chrome --headless --disable-gpu --remote-debugging-port=9222 \
-  --user-data-dir=/tmp/mediroute-test-profile about:blank &
+# Everything (the client is built and served automatically)
+npm test
 
-# 4. Browser suites
-node tests/browser-sos.cjs      http://localhost:4173
-node tests/browser-portals.cjs  http://localhost:4173 http://localhost:5000/api
+# Narrower
+npx playwright test sos                 # one spec
+npx playwright test --project=mobile    # phone profile only
+npx playwright test --headed            # watch it
+npm run test:report                     # open the last HTML report
+
+# The curl suite
+npm run test:api
 ```
 
-Each script exits non-zero if any check fails, so they drop into CI as-is.
+## What the Playwright specs cover
 
-## Notes on reading the results
+| Spec | Covers |
+|:---|:---|
+| `sos.spec.js` | Both reporting branches, every question, validation, geolocation grant and denial, submission, dispatch, live tracking, resume after reload, cancellation, mobile ergonomics |
+| `landing.spec.js` | Hero, routing to `/sos`, all nine walkthrough chapters, transport controls, legal modals, control labelling |
+| `hospital.spec.js` | All four tabs, bay operation, blood ordering persistence, ventilator totals, simple/full, walkthrough |
+| `admin.spec.js` | All five views, live AI status, clock, forecast sanity, simple/full, walkthrough |
+| `paramedic.spec.js` | All four tabs, telemetry honesty, per-patient checklist, dictation labelling, simple/full |
+| `patient.spec.js` | All four tabs, the route to `/sos`, simple/full, walkthrough |
+| `pwa.spec.js` | Manifest validity, raster icons, apple-touch-icon, shortcuts, service worker registration, offline rendering |
+| `ux.spec.js` | Cross-cutting rules: no JS errors, one `h1`, no fabricated values, keyboard access, focus visibility, responsive layout |
 
-- **Test data.** `api-e2e.sh` and `browser-sos.cjs` each create one real
-  incident, because the dispatch pipeline cannot be exercised without one. Both
-  cancel it at the end; rows are tagged `[E2E TEST]` in the address field so
-  anything left behind is easy to find and delete.
+## Things that will bite you
 
-- **A free ambulance is required.** The dispatch assertions need at least one
-  unit with status `AVAILABLE`. If the fleet is fully committed, those checks
-  fail for a legitimate operational reason rather than a regression. Release
-  stale assignments first:
-
-  ```js
-  // units pointing at an incident that no longer exists or is closed
-  db.ambulances.updateMany(
-    { currentIncident: { $ne: null } },
-    { $set: { status: 'AVAILABLE', currentIncident: null } }
-  )
+- **A free ambulance is required.** An open incident holds its unit until it is
+  closed, and there are only four vehicles. Global setup and teardown release
+  them, and the teardown warns loudly when the fleet is empty. If dispatch
+  assertions fail with no vehicle shown, run:
+  ```bash
+  node server/scripts/close-stale-incidents.cjs --apply
   ```
 
-- **`innerText` reflects CSS.** Several headings carry a `uppercase`
-  transform, so assertions against them are case-insensitive on purpose. A
-  case-sensitive check against those strings will fail even though the page is
-  correct.
+- **Test reports are tagged by phone number.** Reports filed through the UI
+  carry a real geocoded address and are otherwise indistinguishable from
+  genuine ones, so the suites write `+91 00000 00000` into the optional phone
+  field and cleanup matches on that. If you add a spec that files a report, use
+  `fillSosUpToConfirm` from `helpers.js` so it is tagged too.
 
-- **The browser suites talk CDP directly** over `ws`, instead of adding
-  Playwright or Puppeteer as a dependency. The trade-off is that they attach to
-  the *first* page target, so a browser already holding port 9222 with another
-  tab open will produce confusing failures. Start it with a fresh
-  `--user-data-dir` for each run.
+- **Auth is rate limited.** `/api/auth` allows 20 attempts per 15 minutes.
+  `helpers.js` caches one token per role for the whole run; do not log in
+  inside a test. Restarting the API clears the limiter, which is in memory.
 
-- **Auth rate limiting.** `/api/auth` allows 20 attempts per 15 minutes, and
-  `browser-portals.cjs` signs in three times per run. Running the suites
-  repeatedly will exhaust that window; the portal suite then prints `SKIP` with
-  an explanation rather than reporting a false failure. Wait for the window to
-  reset, or raise the limit locally while iterating.
+- **`innerText` reflects CSS.** Several headings carry an `uppercase`
+  transform, so assertions against them are deliberately case-insensitive.
 
-- **CORS.** Outside `NODE_ENV=production` the API accepts any loopback origin,
-  which is what lets `vite preview` on 4173 reach it. In production only the
-  configured origins and Vercel preview subdomains are allowed, so a test run
-  against a production build of the server will fail on CORS by design.
+- **The API must not be in production mode locally.** Outside
+  `NODE_ENV=production` any loopback origin is accepted, which is what lets the
+  preview server on 4173 reach it. A production build of the server will refuse
+  those requests by design.
+
+- **Tests write to the real database.** Each dispatch spec creates one real
+  incident, because the pipeline cannot be exercised without one. They are
+  cleaned up on teardown.
 
 ## What these suites deliberately assert
 
 Beyond "it works", several checks exist to stop specific regressions that were
 present in this codebase:
 
-- Triage must report an `engine` naming the model that produced it, and the
-  suites fail if a result silently falls back to the keyword rule engine while
-  the AI is reachable.
-- The citizen-facing screens must express urgency in words and must **not**
-  leak the raw `ESI n` clinical code.
-- The portals must not render any of the previously hardcoded values — frozen
-  clocks, a fixed ETA and speed, invented ventilator totals, or a severity
-  badge pinned to ESI 1.
-- Unauthenticated writes must be refused on every mutating endpoint, and the
-  destructive seed routes must require an admin session.
+- Triage reports an `engine` naming what produced it, so a keyword fallback is
+  never presented as an AI assessment.
+- Citizen screens express urgency in words and never leak the raw `ESI n` code
+  or a status enum like `EN_ROUTE_TO_PATIENT`.
+- No portal renders any of the previously hardcoded values: frozen clocks, a
+  fixed ETA and speed, invented ventilator totals, fabricated vital signs, or a
+  severity badge pinned to ESI 1.
+- Unauthenticated writes are refused on every mutating endpoint, and the
+  destructive seed routes require an admin session.
+- The hero SOS control routes to `/sos`, not `/login`.
+- The PWA manifest starts on the emergency page and declares icons that exist.

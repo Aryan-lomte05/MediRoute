@@ -1,4 +1,4 @@
-# MediRoute — Figma Design Guide
+# MediRoute - Figma Design Guide
 ## How to Create the UI/UX Prototype (For Neil)
 
 ---
@@ -6,7 +6,7 @@
 ## Step 0: Setup
 
 1. Go to **figma.com** → Sign up free (Education plan available)
-2. Create new project: **"MediRoute — Emergency Response Platform"**
+2. Create new project: **"MediRoute - Emergency Response Platform"**
 3. Create a new file: **"MediRoute UI Prototype"**
 4. Set frame size: **390 × 844** (iPhone 14 Pro) for mobile views
 5. Also create **1440 × 900** frames for landing page desktop
@@ -65,7 +65,7 @@ Before making any screens, set up the design system:
 - Optional: Add soft inner glow using Fill with gradient (transparent to Surface/Card)
 
 ### Component 2: ESI Badge
-Create 5 variants (ESI 1–5):
+Create 5 variants (ESI 1-5):
 - ESI 1: Background `Emergency/Default` 20% opacity, Border `Emergency/Default` 40%, Text `#FF2D4A`
 - ESI 2: Orange variant
 - ESI 3: Yellow variant
@@ -109,7 +109,7 @@ Create 5 variants (ESI 1–5):
 - Logo left, actions right
 
 ### Component 9: Portal Tab Bar
-- Full width, 64px height, 3–4 tabs
+- Full width, 64px height, 3-4 tabs
 - Active: `Emergency/Default` text + 2px bottom border
 - Inactive: `Text/Muted`
 
@@ -123,7 +123,7 @@ Create 5 variants (ESI 1–5):
 
 ## Step 3: Screens to Design (12 Total)
 
-### Screen 1: Landing Page — Hero (1440 × 900)
+### Screen 1: Landing Page - Hero (1440 × 900)
 **Elements:**
 - Black background with subtle grid dots (use dots pattern in Figma)
 - Center: Large circle representing the 3D globe (dark blue gradient sphere)
@@ -136,7 +136,7 @@ Create 5 variants (ESI 1–5):
 - Two buttons: "🚨 Launch MediRoute" (Emergency red) + "See How It Works" (Ghost)
 - Floating stat cards below globe
 
-### Screen 2: Landing Page — Features Section (1440 × 900)
+### Screen 2: Landing Page - Features Section (1440 × 900)
 **Elements:**
 - Section heading: "Next-Gen" + "Intelligence" (cyan gradient)
 - 6 feature cards in 3×2 grid (Glass Card)
@@ -154,7 +154,7 @@ Create 5 variants (ESI 1–5):
   - "Enter Platform →" red button
 - 1-Click Demo Login badges for quick evaluation
 
-### Screen 4: Patient Portal — SOS Tab (390 × 844)
+### Screen 4: Patient Portal - SOS Tab (390 × 844)
 **Elements:**
 - Dark header with MediRoute logo
 - Tab bar: SOS (active) | Track | Profile
@@ -169,7 +169,7 @@ Create 5 variants (ESI 1–5):
   - 🎙️ "Start" button (red)
 - Text area: "Chief Complaint" input
 
-### Screen 5: Patient Portal — Track Tab (390 × 844)
+### Screen 5: Patient Portal - Track Tab (390 × 844)
 **Elements:**
 - Full-width dark map (use Figma's dark map mockup or dark rectangle)
   - Dark buildings represented as dark grey rectangles at angle
@@ -184,12 +184,12 @@ Create 5 variants (ESI 1–5):
   - Hospital card
   - Status timeline (checkboxes)
 
-### Screen 6: Patient Portal — SOS Active State (390 × 844)
+### Screen 6: Patient Portal - SOS Active State (390 × 844)
 - Same as Screen 4 but button is dimmed/disabled
 - Toast notification visible at top: "🚨 SOS sent! Finding nearest ambulance..."
-- ESI result card visible: "ESI Level 2 — EMERGENT — 94% confidence"
+- ESI result card visible: "ESI Level 2 - EMERGENT - 94% confidence"
 
-### Screen 7: Paramedic Portal — Dispatch (390 × 844)
+### Screen 7: Paramedic Portal - Dispatch (390 × 844)
 **Elements:**
 - Header with ambulance icon, "GPS Active" with cyan pulse dot
 - Dispatch banner (red background strip): Active Dispatch + incident # + ESI badge
@@ -197,16 +197,16 @@ Create 5 variants (ESI 1–5):
 - Incident details glass card
 - Status update 2×2 button grid (En Route / At Patient / To Hospital / Arrived)
 
-### Screen 8: Paramedic Portal — Navigate Tab (390 × 844)
+### Screen 8: Paramedic Portal - Navigate Tab (390 × 844)
 **Elements:**
 - Almost full-screen dark 3D map (pitch 60°)
 - 3D buildings in very dark grey
 - Bright red glowing route line with thick glow
 - Blue ambulance marker
 - Red destination marker
-- ETA chip at bottom: "⏱ 8 min — 4.2 km"
+- ETA chip at bottom: "⏱ 8 min - 4.2 km"
 
-### Screen 9: Hospital Portal — ER Feed (390 × 844)
+### Screen 9: Hospital Portal - ER Feed (390 × 844)
 **Elements:**
 - Header: Hospital name + "✅ OPEN" green badge + "ER Wait: 12min"
 - Tabs: Feed (2) | Live Map | Resources
@@ -214,16 +214,16 @@ Create 5 variants (ESI 1–5):
   - Card 1 (red left border): ESI-1 CRITICAL badge, Patient name, "Chest pain radiating to arm", vitals row (HR: 118, SpO₂: 92%, RR: 24), AI summary, "Pre-Accept ✓" button
   - Card 2 (orange left border): ESI-2 EMERGENT badge
 
-### Screen 10: Hospital Portal — Resources Tab (390 × 844)
+### Screen 10: Hospital Portal - Resources Tab (390 × 844)
 **Elements:**
 - Resource cards with progress bars:
-  - ICU Beds: 3/20 (red bar — critical)
+  - ICU Beds: 3/20 (red bar - critical)
   - Trauma Beds: 1/10 (red)
   - General Beds: 30/100 (green)
   - Ventilators: 4/15 (yellow)
 - Duty physicians list
 
-### Screen 11: Admin Portal — Dashboard (390 × 844)
+### Screen 11: Admin Portal - Dashboard (390 × 844)
 **Elements:**
 - 2×2 stat card grid:
   - "847" Total Incidents (red)
@@ -234,7 +234,7 @@ Create 5 variants (ESI 1–5):
 - ESI pie chart
 - Recent incidents list (compact)
 
-### Screen 12: Admin Portal — Surge Forecast (390 × 844)
+### Screen 12: Admin Portal - Surge Forecast (390 × 844)
 **Elements:**
 - "Surge Forecast" heading + "TFT Model" purple badge
 - Area chart (12h): Red filled area with glow, Cyan dashed line
