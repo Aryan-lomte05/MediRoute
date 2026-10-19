@@ -33,8 +33,26 @@ const { Server } = require('socket.io')
 const jwt = require('jsonwebtoken')
 const User = require('../models/User')
 const Ambulance = require('../models/Ambulance')
+const Incident = require('../models/Incident')
 
 let io
+
+/** Roles trusted with operational data across patients. */
+const STAFF_ROLES = ['admin', 'paramedic', 'hospital_staff']
+
+/**
+ * Client-supplied ids reach the database directly, so they are shape-checked
+ * first. A malformed id would otherwise throw inside a handler and, because
+ * these run outside Express, bypass the error middleware entirely.
+ */
+const isObjectId = (value) => typeof value === 'string' && /^[0-9a-fA-F]{24}$/.test(value)
+
+const isCoordinatePair = (value) =>
+  Array.isArray(value) &&
+  value.length === 2 &&
+  value.every((n) => Number.isFinite(Number(n))) &&
+  Math.abs(Number(value[1])) <= 90 &&
+  Math.abs(Number(value[0])) <= 180
 
 function initSockets(server) {
   /**
@@ -106,19 +124,64 @@ function initSockets(server) {
 
     // ── Events ──────────────────────────────────────────────
 
-    // Join incident room (patient tracking)
-    socket.on('join_incident', (incidentId) => {
-      socket.join(`incident_${incidentId}`)
-      console.log(`[Socket] ${user.name} joined incident_${incidentId}`)
+    /**
+     * Join the room for one incident.
+     *
+     * Incident rooms carry patient identity, vitals and live position, so
+     * membership is checked rather than granted on request. This previously
+     * joined whatever id the client sent, which let any signed-in account -
+     * including a citizen one - follow a stranger's emergency in full.
+     */
+    socket.on('join_incident', async (incidentId) => {
+      try {
+        if (!isObjectId(incidentId)) return
+
+        // Staff see the cases they are responsible for.
+        if (STAFF_ROLES.includes(user.role)) {
+          socket.join(`incident_${incidentId}`)
+          return
+        }
+
+        // A citizen may follow only their own report.
+        const incident = await Incident.findById(incidentId).select('patient')
+        if (incident && String(incident.patient) === String(user._id)) {
+          socket.join(`incident_${incidentId}`)
+          return
+        }
+
+        console.warn(`[Socket] ${user.name} (${user.role}) refused incident_${incidentId}`)
+      } catch (err) {
+        console.error('[Socket] join_incident error:', err.message)
+      }
     })
 
     socket.on('leave_incident', (incidentId) => {
       socket.leave(`incident_${incidentId}`)
     })
 
-    // Live GPS ping from paramedic app
+    /**
+     * Live GPS ping from the crew's device.
+     *
+     * Requires a responder role AND that the vehicle is the one this user is
+     * crewing. Without both checks any signed-in account could rewrite any
+     * ambulance's position, which is what the tracking map and the command
+     * centre treat as truth. The REST equivalent
+     * (PATCH /ambulances/:id/location) is guarded the same way; leaving the
+     * socket open would simply have moved the hole rather than closing it.
+     */
     socket.on('gps_update', async (data) => {
-      const { ambulanceId, coordinates, heading, speed } = data
+      const { ambulanceId, coordinates, heading, speed } = data || {}
+
+      if (!['paramedic', 'admin'].includes(user.role)) {
+        console.warn(`[Socket] ${user.name} (${user.role}) refused gps_update`)
+        return
+      }
+      if (!isObjectId(ambulanceId) || !isCoordinatePair(coordinates)) return
+      if (user.role === 'paramedic' && String(user.ambulanceId) !== String(ambulanceId)) {
+        console.warn(`[Socket] ${user.name} refused gps_update for another unit`)
+        return
+      }
+
       try {
         await Ambulance.findByIdAndUpdate(ambulanceId, {
           'currentLocation.coordinates': coordinates,
@@ -126,6 +189,9 @@ function initSockets(server) {
           'currentLocation.speed': speed,
           'currentLocation.updatedAt': new Date(),
           lastPing: new Date(),
+          // A real crew device owns this unit from now on, so the server-side
+          // movement simulator steps aside.
+          isSimulated: false,
         })
 
         // Broadcast to all listeners of this ambulance
@@ -144,23 +210,57 @@ function initSockets(server) {
       }
     })
 
-    // Hospital resource update
+    /**
+     * Hospital resource update.
+     * Restricted to the people who can actually change capacity: a fake
+     * broadcast here would alter what the command centre believes is free.
+     */
     socket.on('resource_update', (data) => {
+      if (!['hospital_staff', 'admin'].includes(user.role)) {
+        console.warn(`[Socket] ${user.name} (${user.role}) refused resource_update`)
+        return
+      }
       socket.to('admin').emit('hospital_resources_update', data)
       socket.to('paramedic').emit('hospital_resources_update', data)
     })
 
-    // Paramedic vitals update
+    /**
+     * Vitals measured by the crew.
+     * Responder-only: these are clinical readings the receiving ER acts on, so
+     * an unprivileged sender could put invented numbers in front of a trauma
+     * team. Broadcast only, never stored; vitals are persisted through
+     * PATCH /api/incidents/:id/status, which re-triages on worsening numbers.
+     */
     socket.on('vitals_update', (data) => {
-      const { incidentId, vitals } = data
-      socket.to(`incident_${incidentId}`).emit('vitals_update', { incidentId, vitals })
-      socket.to('hospital').emit('vitals_update', { incidentId, vitals })
-      socket.to('admin').emit('vitals_update', { incidentId, vitals })
+      const { incidentId, vitals } = data || {}
+
+      if (!['paramedic', 'admin'].includes(user.role)) {
+        console.warn(`[Socket] ${user.name} (${user.role}) refused vitals_update`)
+        return
+      }
+      if (!isObjectId(incidentId)) return
+
+      const payload = { incidentId, vitals, by: user.name }
+      socket.to(`incident_${incidentId}`).emit('vitals_update', payload)
+      socket.to('hospital').emit('vitals_update', payload)
+      socket.to('admin').emit('vitals_update', payload)
     })
 
-    // Chat/notes in incident channel
+    /**
+     * Messages in an incident channel.
+     * Only to a room this socket has already been admitted to, so the
+     * membership check in join_incident cannot be sidestepped by posting to an
+     * arbitrary id.
+     */
     socket.on('incident_message', (data) => {
-      const { incidentId, message } = data
+      const { incidentId, message } = data || {}
+      if (!isObjectId(incidentId)) return
+
+      if (!socket.rooms.has(`incident_${incidentId}`)) {
+        console.warn(`[Socket] ${user.name} refused incident_message to a room they are not in`)
+        return
+      }
+
       io.to(`incident_${incidentId}`).emit('incident_message', {
         ...message,
         sender: { id: user._id, name: user.name, role: user.role },

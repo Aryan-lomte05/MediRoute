@@ -110,7 +110,12 @@ const incidentSchema = new mongoose.Schema(
       },
     ],
     route: {
-      geometry: Object, // GeoJSON LineString
+      // GeoJSON LineString of the actual road path for the current leg. The
+      // command centre and the patient's tracking map draw this; without it
+      // a client can only show a moving dot with no route behind it.
+      geometry: Object,
+      // Which leg the geometry describes, so a client can label and colour it.
+      leg: { type: String, enum: ['TO_PATIENT', 'TO_HOSPITAL'], default: null },
       distanceKm: Number,
       etaMinutes: Number,
       osrmRoute: Object,

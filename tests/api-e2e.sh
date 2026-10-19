@@ -84,7 +84,13 @@ ETA=$(echo "$TRACK" | jqp "(d['incident'].get('route') or {}).get('etaMinutes','
 
 if [ "$ESI" = "1" ] || [ "$ESI" = "2" ]; then ok "unconscious trauma -> ESI $ESI"; else bad "triage severity" "ESI $ESI"; fi
 case "$ENG" in groq:*) ok "pipeline used a real model";; *) bad "pipeline engine" "$ENG";; esac
-check "status after dispatch" "DISPATCHED" "$STAT"
+# The unit simulator advances a dispatched job to EN_ROUTE_TO_PATIENT within a
+# few seconds, so both are correct here. This previously asserted DISPATCHED
+# only, which encoded the old behaviour where nothing ever moved the job on.
+case "$STAT" in
+  DISPATCHED|EN_ROUTE_TO_PATIENT) ok "status after dispatch ($STAT)";;
+  *) bad "status after dispatch" "got $STAT";;
+esac
 [ -n "$AMB" ] && ok "ambulance assigned ($AMB)" || bad "ambulance assigned" "none"
 [ -n "$HOSPN" ] && ok "hospital allocated ($HOSPN)" || bad "hospital allocated" "none"
 [ -n "$DIST" ] && ok "real distance computed (${DIST}km / ${ETA}min)" || bad "distance" "missing"

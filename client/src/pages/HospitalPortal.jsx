@@ -327,7 +327,7 @@ export default function HospitalPortal() {
     socket.on('incoming_patient', (data) => {
       if (data.incident) {
         setInboundIncident(data.incident)
-        toast.error(`🚨 INBOUND PATIENT ALERT: ${data.incident.triageData?.chiefComplaint || 'Critical Patient'} en route!`, { duration: 8000 })
+        toast.error(`🚨 INBOUND PATIENT ALERT: ${data.incident.triageData?.chiefComplaint || 'Details pending'} en route!`, { duration: 8000 })
       }
     })
 
@@ -525,7 +525,7 @@ export default function HospitalPortal() {
       const kemEl = document.createElement('div')
       kemEl.className =
         'px-2.5 py-1.5 rounded-lg bg-[#7C3AED] border-2 border-[#A855F7] text-white font-mono font-bold text-xs shadow-[0_0_20px_rgba(168,85,247,0.8)]'
-      kemEl.innerHTML = `🏥 ${hospitalData?.name || 'Lilavati Trauma Center'}`
+      kemEl.innerHTML = `🏥 ${hospitalData?.name || 'This hospital'}`
       new mapboxgl.Marker({ element: kemEl, anchor: 'bottom' }).setLngLat([72.8428, 19.0025]).addTo(map)
     })
 
@@ -570,7 +570,7 @@ export default function HospitalPortal() {
             </div>
             <div>
               <div className="text-sm font-extrabold text-white leading-tight">
-                {hospitalData?.name || 'Lilavati Hospital & Research Centre'}
+                {hospitalData?.name || 'Loading hospital…'}
               </div>
               <div className="text-[10px] text-white/50 leading-tight">Level 1 Comprehensive Trauma Facility · Mumbai</div>
               <div className="text-[8px] font-mono tracking-[0.16em] text-cyan-400 font-bold uppercase mt-0.5">

@@ -215,6 +215,32 @@ async function stepIncident(incident, io) {
     const line = await fetchRoad(unitAt, destination)
     leg = { line, index: 0 }
     routeCache.set(cacheKey, leg)
+
+    /**
+     * Persist the road geometry for this leg.
+     *
+     * Without this the clients have no idea what path the vehicle is taking,
+     * so the command centre could only draw a moving dot with no route behind
+     * it. The map previously filled that gap with a decorative hardcoded
+     * corridor, which looked like a route but led nowhere near the patient.
+     */
+    await Incident.findByIdAndUpdate(incident._id, {
+      'route.geometry': { type: 'LineString', coordinates: line },
+      'route.leg': goingToHospital ? 'TO_HOSPITAL' : 'TO_PATIENT',
+    })
+
+    if (io) {
+      const routePayload = {
+        incidentId: String(incident._id),
+        ambulanceId: String(ambulance._id),
+        geometry: { type: 'LineString', coordinates: line },
+        leg: goingToHospital ? 'TO_HOSPITAL' : 'TO_PATIENT',
+        simulated: true,
+      }
+      for (const room of [`incident_${incident._id}`, 'admin', 'hospital', 'patient']) {
+        io.to(room).emit('route_updated', routePayload)
+      }
+    }
   }
 
   // ── Move ─────────────────────────────────────────────────────────────────

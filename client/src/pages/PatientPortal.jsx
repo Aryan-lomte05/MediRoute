@@ -339,7 +339,7 @@ export default function PatientPortal() {
 
   // Profile Form state
   const [profileForm, setProfileForm] = useState({
-    name: user?.name || 'Citizen John Doe',
+    name: user?.name || '',
     phone: user?.phone || '+91 90000 11111',
     bloodType: user?.emergencyProfile?.bloodType || 'O+',
     allergies: (user?.emergencyProfile?.allergies || ['Penicillin', 'Peanuts']).join(', '),
@@ -410,7 +410,12 @@ export default function PatientPortal() {
           assignedAmbulance: data.ambulance,
           status: 'DISPATCHED',
         } : prev)
-        toast.success(`Unit ${data.ambulance?.vehicleNumber || 'EMS-104'} assigned & dispatched!`, { icon: '🚑' })
+        toast.success(
+          data.ambulance?.vehicleNumber
+            ? `Unit ${data.ambulance.vehicleNumber} assigned`
+            : 'An ambulance has been assigned',
+          { icon: '🚑' }
+        )
       }
     }
 
@@ -774,7 +779,7 @@ export default function PatientPortal() {
                       Ambulance Dispatched & En Route
                     </div>
                     <div className="text-sm font-bold text-white leading-tight mt-0.5">
-                      Unit {activeIncident?.assignedAmbulance?.vehicleNumber || 'MH-AMB-002'}
+                      Unit {activeIncident?.assignedAmbulance?.vehicleNumber || 'pending'}
                     </div>
                     <div className="text-[10px] text-white/50 leading-tight mt-0.5">
                       Assigned: {activeIncident?.assignedAmbulance?.vehicleType?.replace(/_/g, ' ') || 'ADVANCED LIFE SUPPORT'}

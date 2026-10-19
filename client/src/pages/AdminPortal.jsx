@@ -26,7 +26,8 @@
  *                  - View 1: 🗺️ 3D Tactical GIS Command Map & Live Incident Queue
  *                  - View 2: 🚑 Advanced Ambulance Fleet Telemetry & Maintenance Manager
  *                  - View 3: 🏥 City Hospital Bed Matrix, ICU Ward Status & Diversion Controls
- *                  - View 4: 📊 AI Predictive Surge Analytics & Call Volume Forecasting (Recharts)
+ *                  - View 4: 📊 Demand Forecast - statistical, derived from incident
+ *                    history by hour of day. Makes no model call; it is not AI.
  *                  - View 5: 📑 Emergency Incident Audit Log, Filters & Detailed Timelines
  * ==============================================================================
  */
@@ -43,7 +44,6 @@ import { ModeToggle, GuideButton } from '../components/PortalGuide'
 import { useUiStore } from '../store/uiStore'
 import AiStatusBadge from '../components/AiStatusBadge'
 import toast from 'react-hot-toast'
-import { ADMIN_REAL_ROUTE } from '../lib/routing'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
@@ -120,6 +120,16 @@ export default function AdminPortal() {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
   const orbitAnimationRef = useRef(null)
+  // Drives the travelling dash on the active dispatch routes.
+  const routeDashTimerRef = useRef(null)
+  /*
+   * Map layers are created on the style 'load' event, which can finish after
+   * the first data poll. Effects that write into those layers therefore need
+   * to re-run when the map becomes ready, not only when the data changes -
+   * otherwise a route drawn from an earlier poll never appears until the next
+   * one, up to 20 seconds later.
+   */
+  const [mapReady, setMapReady] = useState(false)
   const markersRef = useRef([])
 
   // Live Digital Clock
@@ -307,8 +317,11 @@ export default function AdminPortal() {
                 ['==', ['get', 'congestion'], 'severe'], '#991b1b',
                 '#38bdf8',
               ],
-              'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 14, 2.5, 17, 5],
-              'line-opacity': 0.65,
+              'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 14, 1.6, 17, 3],
+              // Deliberately faint. Traffic is background context; the active
+              // dispatch route has to be the brightest thing on the map, and
+              // at the old weight the two were indistinguishable.
+              'line-opacity': 0.3,
             },
           })
         }
@@ -316,91 +329,104 @@ export default function AdminPortal() {
         console.warn('Traffic layer init warning:', e)
       }
 
-      // 2. Add Live Glowing Green Corridor GeoJSON Line (100% Real-Road Snapped)
-      const adminCoords = ADMIN_REAL_ROUTE?.coordinates || [
-        [72.831, 19.002],
-        [72.836, 19.012],
-        [72.842, 19.021],
-        [72.845, 19.025],
-        [72.848, 19.028],
-        [72.852, 19.035],
-      ]
-
-      if (!map.getSource('green-corridor-route')) {
-        map.addSource('green-corridor-route', {
+      /*
+       * 2. Live dispatch routes.
+       *
+       * This used to draw a fixed decorative corridor from hardcoded
+       * coordinates, in the same cyan as the traffic layer. It looked like a
+       * route but led nowhere near any patient, and the real path a dispatched
+       * ambulance was taking was never drawn at all.
+       *
+       * The source starts empty and is filled from incident.route.geometry,
+       * which the dispatch pipeline computes from OSRM road geometry.
+       */
+      if (!map.getSource('dispatch-routes')) {
+        map.addSource('dispatch-routes', {
           type: 'geojson',
-          data: {
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: adminCoords,
-            },
+          data: { type: 'FeatureCollection', features: [] },
+        })
+
+        // Wide soft glow underneath, so the line separates from the basemap.
+        map.addLayer({
+          id: 'dispatch-route-glow',
+          type: 'line',
+          source: 'dispatch-routes',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': ['case', ['==', ['get', 'leg'], 'TO_HOSPITAL'], '#A855F7', '#FF2D4A'],
+            'line-width': ['interpolate', ['linear'], ['zoom'], 11, 10, 16, 26],
+            'line-opacity': 0.25,
+            'line-blur': 8,
           },
         })
 
+        // The solid core.
         map.addLayer({
-          id: 'green-corridor-glow',
+          id: 'dispatch-route-core',
           type: 'line',
-          source: 'green-corridor-route',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          source: 'dispatch-routes',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
           paint: {
-            'line-color': '#00F5FF',
-            'line-width': 8,
-            'line-opacity': 0.35,
-            'line-blur': 4,
-          },
-        })
-
-        map.addLayer({
-          id: 'green-corridor-core',
-          type: 'line',
-          source: 'green-corridor-route',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': '#00F5FF',
-            'line-width': 3,
+            'line-color': ['case', ['==', ['get', 'leg'], 'TO_HOSPITAL'], '#A855F7', '#FF2D4A'],
+            'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3, 16, 7],
             'line-opacity': 0.95,
           },
         })
-      }
 
-      // Secondary Blue Hospital Connection
-      if (!map.getSource('hospital-feed-route')) {
-        map.addSource('hospital-feed-route', {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: [
-                [72.852, 19.035],
-                [72.868, 19.065],
-                [72.875, 19.080],
-              ],
-            },
-          },
-        })
-
+        // A white dash running over the core gives the line direction, which a
+        // static stroke cannot: you can see which way the unit is travelling.
         map.addLayer({
-          id: 'hospital-feed-line',
+          id: 'dispatch-route-flow',
           type: 'line',
-          source: 'hospital-feed-route',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          source: 'dispatch-routes',
+          layout: { 'line-cap': 'butt' },
           paint: {
-            'line-color': '#3B82F6',
-            'line-width': 2.5,
-            'line-opacity': 0.8,
-            'line-dasharray': [2, 2],
+            'line-color': '#ffffff',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.5, 16, 3],
+            'line-opacity': 0.9,
+            'line-dasharray': [0, 4, 3],
           },
         })
+
+        // Animate the dash offset. Mapbox cannot tween dasharray, so the
+        // pattern is stepped through a short cycle instead.
+        const DASH_CYCLE = [
+          [0, 4, 3],
+          [0.5, 4, 2.5],
+          [1, 4, 2],
+          [1.5, 4, 1.5],
+          [2, 4, 1],
+          [2.5, 4, 0.5],
+          [3, 4, 0],
+          [0, 0.5, 3, 3.5],
+          [0, 1, 3, 3],
+          [0, 1.5, 3, 2.5],
+          [0, 2, 3, 2],
+          [0, 2.5, 3, 1.5],
+          [0, 3, 3, 1],
+          [0, 3.5, 3, 0.5],
+        ]
+        let dashStep = 0
+        const stepDash = () => {
+          if (!mapInstanceRef.current || !mapInstanceRef.current.getLayer('dispatch-route-flow')) return
+          dashStep = (dashStep + 1) % DASH_CYCLE.length
+          mapInstanceRef.current.setPaintProperty(
+            'dispatch-route-flow',
+            'line-dasharray',
+            DASH_CYCLE[dashStep]
+          )
+        }
+        routeDashTimerRef.current = setInterval(stepDash, 90)
       }
+
+      // Layers exist now; anything that paints into them can run.
+      setMapReady(true)
     })
 
     mapInstanceRef.current = map
 
     return () => {
+      setMapReady(false)
       if (orbitAnimationRef.current) cancelAnimationFrame(orbitAnimationRef.current)
       markersRef.current.forEach((m) => m.remove())
       markersRef.current = []
@@ -410,85 +436,79 @@ export default function AdminPortal() {
   }, [activeView])
 
   // Fallback feed items if database is freshly initialized
-  const defaultIncidentFeed = [
-    {
-      id: 'INC-7842',
-      time: '20:21',
-      channel: 'call',
-      esi: 1,
-      title: 'Acute Myocardial Infarction',
-      location: 'Lower Parel, Mumbai',
-      assigned: 'EMS-104',
-      eta: '6 min',
-      accentColor: '#FF2D4A',
-      coords: [72.831, 19.002],
-    },
-    {
-      id: 'INC-7841',
-      time: '20:18',
-      channel: 'whatsapp',
-      esi: 2,
-      title: 'Road Traffic Accident',
-      location: 'Bandra Kurla Complex',
-      assigned: 'EMS-218',
-      eta: '8 min',
-      accentColor: '#FF8C00',
-      coords: [72.868, 19.065],
-    },
-    {
-      id: 'INC-7840',
-      time: '20:16',
-      channel: 'call',
-      esi: 1,
-      title: 'Unconscious Patient',
-      location: 'Andheri West',
-      assigned: 'EMS-076',
-      eta: '5 min',
-      accentColor: '#FF2D4A',
-      coords: [72.835, 19.12],
-    },
-    {
-      id: 'INC-7839',
-      time: '20:13',
-      channel: 'app',
-      esi: 3,
-      title: 'Respiratory Distress',
-      location: 'Powai',
-      assigned: 'EMS-311',
-      eta: '12 min',
-      accentColor: '#3B82F6',
-      coords: [72.905, 19.117],
-    },
-  ]
 
-  const displayFeed =
-    incidents.length > 0
-      ? incidents.map((inc) => {
-          // Untriaged incidents are grouped separately rather than being counted
-          // as ESI-2, which silently inflated the emergent bucket.
-          const esi = inc.triageData?.esiLevel ?? null
-          const colorMap = { 1: '#FF2D4A', 2: '#FF8C00', 3: '#3B82F6', 4: '#10B981', 5: '#6B7280' }
-          const createdDate = new Date(inc.createdAt || Date.now())
-          const timeStr = createdDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
-          return {
-            id: inc.incidentNumber || `INC-${inc._id.slice(-4)}`,
-            mongoId: inc._id,
-            time: timeStr,
-            channel: inc.channel || 'app',
-            esi,
-            title: inc.triageData?.chiefComplaint || 'Emergency SOS Dispatch',
-            aiSummary: inc.triageData?.aiSummary || 'Immediate emergency medical response deployed.',
-            location: inc.location?.address || 'Mumbai, Maharashtra',
-            assigned: inc.assignedAmbulance?.vehicleNumber || 'Dispatching',
-            allocatedHospital: inc.allocatedHospital?.name || 'Lilavati Hospital',
-            eta: '4-6 min',
-            status: inc.status,
-            accentColor: colorMap[esi] || '#FF2D4A',
-            coords: inc.location?.coordinates || [72.841, 19.052],
-            raw: inc,
-          }
-        })
-      : defaultIncidentFeed
+
+  /**
+   * Put the map on an incident.
+   *
+   * When the incident has a dispatch route, the camera frames the entire leg
+   * rather than the incident point. A city leg is only a kilometre or two, so
+   * at the citywide default zoom the route is drawn but far too small to read,
+   * which made it look as though no path was being shown at all.
+   */
+  const focusIncident = (item) => {
+    const map = mapInstanceRef.current
+    if (!map || !item) return
+
+    const coords = item.raw?.route?.geometry?.coordinates
+    if (Array.isArray(coords) && coords.length > 1) {
+      const lngs = coords.map((c) => c[0])
+      const lats = coords.map((c) => c[1])
+      map.fitBounds(
+        [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ],
+        { padding: { top: 140, bottom: 140, left: 420, right: 320 }, pitch: 55, duration: 1400 }
+      )
+      return
+    }
+
+    if (item.coords) {
+      map.flyTo({ center: item.coords, zoom: 15.2, pitch: 58, duration: 1200 })
+    }
+  }
+
+  const displayFeed = incidents.map((inc) => {
+    // Untriaged incidents are grouped separately rather than being counted
+    // as ESI-2, which silently inflated the emergent bucket.
+    const esi = inc.triageData?.esiLevel ?? null
+    const colorMap = { 1: '#FF2D4A', 2: '#FF8C00', 3: '#3B82F6', 4: '#10B981', 5: '#6B7280' }
+    const createdDate = new Date(inc.createdAt || Date.now())
+    const timeStr = createdDate.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+
+    /*
+     * Every field below used to carry a fallback that invented data: a fixed
+     * "4-6 min" ETA on every row regardless of distance, a hospital name for
+     * cases where none was allocated, a fabricated clinical summary, and
+     * coordinates that placed an unlocated incident at a real junction on the
+     * tactical map. They now resolve to null, and the UI renders an em dash.
+     */
+    return {
+      id: inc.incidentNumber || `INC-${String(inc._id).slice(-4)}`,
+      mongoId: inc._id,
+      time: timeStr,
+      channel: inc.channel || 'app',
+      esi,
+      title: inc.triageData?.chiefComplaint || 'Awaiting details',
+      aiSummary: inc.triageData?.aiSummary || null,
+      triageEngine: inc.triageData?.engine || null,
+      location: inc.location?.address || null,
+      assigned: inc.assignedAmbulance?.vehicleNumber || null,
+      allocatedHospital: inc.allocatedHospital?.name || null,
+      // Computed by the dispatch pipeline from real road distance.
+      etaMinutes: inc.route?.etaMinutes ?? null,
+      distanceKm: inc.route?.distanceKm ?? null,
+      status: inc.status,
+      accentColor: colorMap[esi] || '#6B7280',
+      coords: inc.location?.coordinates || null,
+      raw: inc,
+    }
+  })
 
   const filteredFeed = displayFeed.filter((item) => {
     const matchesSearch =
@@ -587,12 +607,12 @@ export default function AdminPortal() {
           <span class="text-xs">🚑</span>
           <div>
             <div class="text-cyan-300 font-bold leading-tight">${a.vehicleNumber}</div>
-            <div class="text-emerald-400 text-[8px] font-semibold leading-tight">${spd} km/h · ${a.status}</div>
+            <div class="text-emerald-400 text-[8px] font-semibold leading-tight">${spd != null ? spd + ' km/h' : 'speed n/a'} · ${a.status}</div>
           </div>
         </div>
       `,
         () => {
-          toast(`🚑 Unit ${a.vehicleNumber} · Status: ${a.status} · Speed: ${spd} km/h`)
+          toast(`🚑 Unit ${a.vehicleNumber} · ${a.status}${spd != null ? ' · ' + spd + ' km/h' : ''}`)
           map.flyTo({ center: coords, zoom: 15.2, pitch: 60, duration: 1000 })
         }
       )
@@ -617,11 +637,66 @@ export default function AdminPortal() {
       `,
         () => {
           setSelectedIncident(item)
-          map.flyTo({ center: item.coords, zoom: 15.2, pitch: 58, duration: 1200 })
+          focusIncident(item)
         }
       )
     })
   }, [activeView, hospitals, ambulances, displayFeed])
+
+  /**
+   * Draw the road path of every incident currently being driven.
+   *
+   * The geometry is computed server-side from OSRM when a unit starts a leg
+   * and stored on the incident, so this is the actual route the ambulance is
+   * following rather than a decorative line. Red runs to the patient, purple
+   * runs to the hospital.
+   */
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map || !mapReady || activeView !== 'map') return
+
+    const source = map.getSource && map.getSource('dispatch-routes')
+    if (!source) return
+
+    const DRIVING = [
+      'DISPATCHED',
+      'EN_ROUTE_TO_PATIENT',
+      'AT_PATIENT',
+      'EN_ROUTE_TO_HOSPITAL',
+    ]
+
+    const features = incidents
+      .filter((inc) => DRIVING.includes(inc.status))
+      .map((inc) => {
+        const coords = inc.route?.geometry?.coordinates
+        if (!Array.isArray(coords) || coords.length < 2) return null
+        return {
+          type: 'Feature',
+          properties: {
+            incidentId: String(inc._id),
+            leg: inc.route?.leg || 'TO_PATIENT',
+            unit: inc.assignedAmbulance?.vehicleNumber || '',
+          },
+          geometry: { type: 'LineString', coordinates: coords },
+        }
+      })
+      .filter(Boolean)
+
+    try {
+      source.setData({ type: 'FeatureCollection', features })
+    } catch (err) {
+      console.warn('[map] could not update dispatch routes:', err.message)
+    }
+  }, [incidents, activeView, mapReady])
+
+  // Stop the dash animation when the map goes away, or it keeps running
+  // against a destroyed map for the life of the session.
+  useEffect(() => {
+    return () => {
+      if (routeDashTimerRef.current) clearInterval(routeDashTimerRef.current)
+      routeDashTimerRef.current = null
+    }
+  }, [])
 
   // Camera Angle Controls
   const handleCameraAngle = (type) => {
@@ -792,7 +867,7 @@ export default function AdminPortal() {
             <span className="text-white/90 font-semibold">Mumbai Metropolitan Region</span>
             <span className="text-white/30">▾</span>
             <span className="text-white/20">|</span>
-            <span className="text-white/60">{currentTime || '19 Sep 2026 | 20:24:17 IST'}</span>
+            <span className="text-white/60">{currentTime}</span>
           </div>
         </div>
 
@@ -914,7 +989,7 @@ export default function AdminPortal() {
               }`}
             >
               <span>📊</span>
-              <span>AI Predictive Surge</span>
+              <span>Demand Forecast</span>
             </button>
           )}
 
@@ -1048,7 +1123,7 @@ export default function AdminPortal() {
                       onClick={() => {
                         setSelectedIncident(item)
                         if (mapInstanceRef.current && item.coords) {
-                          mapInstanceRef.current.flyTo({ center: item.coords, zoom: 14.8, pitch: 60, duration: 1200 })
+                          focusIncident(item)
                         }
                       }}
                       className={`p-3 rounded-lg cursor-pointer transition-all border text-left relative overflow-hidden group ${
@@ -1095,7 +1170,7 @@ export default function AdminPortal() {
                           <strong className="text-white font-semibold">{item.assigned}</strong>
                         </span>
                         <span className="text-emerald-400 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                          ETA {item.eta}
+                          {item.etaMinutes != null ? `ETA ${item.etaMinutes} min` : 'ETA pending'}
                         </span>
                       </div>
                     </div>
@@ -1378,7 +1453,7 @@ export default function AdminPortal() {
                             <span className="text-xs text-white/50">· {selectedIncident.title}</span>
                           </div>
                           <div className="text-[11px] text-white/50 font-mono mt-0.5">
-                            📍 {selectedIncident.location} · Time: {selectedIncident.time} · Status: {selectedIncident.status || 'ACTIVE'}
+                            📍 {selectedIncident.location} · Time: {selectedIncident.time} · Status: {selectedIncident.status || 'Unknown'}
                           </div>
                         </div>
                       </div>
@@ -1405,24 +1480,24 @@ export default function AdminPortal() {
                       <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10">
                         <div className="text-white/40 text-[10px] uppercase font-semibold">MediAI Clinical Assessment</div>
                         <div className="text-white mt-1 leading-relaxed font-sans font-medium text-xs">
-                          {selectedIncident.aiSummary || 'Patient prioritized for immediate emergency trauma team intake.'}
+                          {selectedIncident.aiSummary || 'No clinical assessment recorded yet.'}
                         </div>
                       </div>
 
                       <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10">
                         <div className="text-white/40 text-[10px] uppercase font-semibold">Assigned Unit</div>
                         <div className="text-cyan-300 font-bold text-sm mt-1">
-                          🚑 {selectedIncident.assigned || 'MH-AMB-002'}
+                          🚑 {selectedIncident.assigned || 'No unit assigned'}
                         </div>
                         <div className="text-white/50 text-[10px] mt-0.5">
-                          Status: {selectedIncident.status || 'DISPATCHED'} · Priority Green Corridor Active
+                          Status: {selectedIncident.status || 'Unknown'}
                         </div>
                       </div>
 
                       <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10">
                         <div className="text-white/40 text-[10px] uppercase font-semibold">Allocated Trauma Facility</div>
                         <div className="text-purple-300 font-bold text-sm mt-1">
-                          🏥 {selectedIncident.allocatedHospital || 'Lilavati Hospital'}
+                          🏥 {selectedIncident.allocatedHospital || 'Not allocated'}
                         </div>
                         <div className="text-white/50 text-[10px] mt-0.5">Trauma Bay 01 Standby Cleared</div>
                       </div>
@@ -1492,7 +1567,7 @@ export default function AdminPortal() {
                         <div className="flex items-start justify-between">
                           <div>
                             <div className="text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider">
-                              {amb.vehicleType?.replace(/_/g, ' ') || 'ADVANCED LIFE SUPPORT'}
+                              {amb.vehicleType?.replace(/_/g, ' ') || 'Type not set'}
                             </div>
                             <div className="text-xl font-extrabold text-white mt-0.5">{amb.vehicleNumber}</div>
                           </div>
@@ -1512,7 +1587,7 @@ export default function AdminPortal() {
                           <div className="p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]">
                             <div className="text-[10px] text-white/40">Paramedic Lead</div>
                             <div className="text-white font-semibold mt-0.5 truncate">
-                              {amb.assignedParamedic?.name || 'Rahul Sharma (EMT-P)'}
+                              {amb.assignedParamedic?.name || 'No crew assigned'}
                             </div>
                           </div>
                           <div className="p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]">
@@ -1625,7 +1700,7 @@ export default function AdminPortal() {
                             </div>
                             <div className="text-lg font-extrabold text-white mt-0.5">{hosp.name}</div>
                             <div className="text-xs text-white/50 leading-tight mt-0.5">
-                              {hosp.location?.address || 'Bandra West, Mumbai'}
+                              {hosp.location?.address || 'Address not set'}
                             </div>
                           </div>
 
@@ -1739,7 +1814,7 @@ export default function AdminPortal() {
             <div className="pb-4 border-b border-white/[0.08]">
               <h2 className="text-2xl font-extrabold text-white flex items-center gap-2.5">
                 <span>📊</span>
-                <span>AI Predictive Surge & Load Forecasting Center</span>
+                <span>Demand Forecast (from incident history)</span>
               </h2>
               <p className="text-xs text-white/50 mt-1 font-mono">
                 Powered by Temporal Fusion Transformer (TFT) multi-agent neural models with weather and traffic correlation.
@@ -1879,10 +1954,12 @@ export default function AdminPortal() {
                           <div className="text-[10px] text-white/40">{item.location}</div>
                         </td>
                         <td className="p-3.5 text-cyan-300 font-bold">{item.assigned}</td>
-                        <td className="p-3.5 text-purple-300 font-medium">{item.allocatedHospital}</td>
+                        <td className="p-3.5 text-purple-300 font-medium">
+                          {item.allocatedHospital || <span className="text-white/30">Not allocated</span>}
+                        </td>
                         <td className="p-3.5">
                           <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-white/70 text-[10px]">
-                            {item.status || 'ACTIVE'}
+                            {item.status || 'Unknown'}
                           </span>
                         </td>
                         <td className="p-3.5 text-right space-x-2">
@@ -1900,7 +1977,7 @@ export default function AdminPortal() {
                               setActiveView('map')
                               setTimeout(() => {
                                 if (mapInstanceRef.current && item.coords) {
-                                  mapInstanceRef.current.flyTo({ center: item.coords, zoom: 15.2, pitch: 58, duration: 1000 })
+                                  focusIncident(item)
                                 }
                               }, 300)
                             }}
@@ -1984,8 +2061,18 @@ export default function AdminPortal() {
                     {stats?.avgDispatchSeconds != null ? `${stats.avgDispatchSeconds}s` : '-'}
                   </span>
                   <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
-                    <span>↓ 32%</span>
-                    <span className="text-white/40">vs. last week</span>
+                    {/*
+                      A week-over-week comparison was shown here as a fixed
+                      "down 32%". Nothing computes a previous-week figure, so
+                      it was decoration attached to a real measurement. The
+                      sample size is shown instead, which is both true and more
+                      useful for judging the number above it.
+                    */}
+                    <span className="text-white/40">
+                      {stats?.avgDispatchSampleSize
+                        ? `over ${stats.avgDispatchSampleSize} dispatches`
+                        : 'no dispatches yet'}
+                    </span>
                   </span>
                 </div>
                 <svg className="w-14 h-5 text-cyan-400" viewBox="0 0 60 20" fill="none" stroke="currentColor" strokeWidth={2}>

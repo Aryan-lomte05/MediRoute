@@ -58,7 +58,7 @@ test.describe('Admin - every view', () => {
     { name: /3d tactical gis/i, expect: /incident|unit|hospital|live/i },
     { name: /fleet operations/i, expect: /MH-AMB|vehicle|fleet/i },
     { name: /trauma & bed matrix/i, expect: /icu|bed|hospital/i },
-    { name: /ai predictive surge/i, expect: /forecast|surge|load|confidence/i },
+    { name: /demand forecast/i, expect: /forecast|surge|load|confidence/i },
     { name: /incident ledger/i, expect: /inc-|incident|no incidents/i },
   ]
 
@@ -81,7 +81,7 @@ test.describe('Admin - forecast honesty', () => {
   test('surge confidence is a sane percentage, not a multiplied value', async ({ page }) => {
     await page.goto('/admin')
     await page.waitForTimeout(4000)
-    await page.getByRole('button', { name: /ai predictive surge/i }).click()
+    await page.getByRole('button', { name: /demand forecast/i }).click()
     await page.waitForTimeout(2000)
 
     const text = await page.locator('body').innerText()
@@ -103,7 +103,7 @@ test.describe('Admin - guidance and density', () => {
     await page.getByRole('group', { name: /display density/i }).getByRole('button', { name: /simple/i }).click()
 
     await expect(page.getByRole('button', { name: /fleet operations/i })).toBeHidden()
-    await expect(page.getByRole('button', { name: /ai predictive surge/i })).toBeHidden()
+    await expect(page.getByRole('button', { name: /demand forecast/i })).toBeHidden()
     await expect(page.getByText(/live emergencies across the city/i)).toBeVisible()
 
     await page.getByRole('group', { name: /display density/i }).getByRole('button', { name: /full/i }).click()
@@ -114,7 +114,7 @@ test.describe('Admin - guidance and density', () => {
     await page.goto('/admin')
     await page.waitForTimeout(4000)
 
-    await page.getByRole('button', { name: /ai predictive surge/i }).click()
+    await page.getByRole('button', { name: /demand forecast/i }).click()
     await page.waitForTimeout(1200)
 
     await page.getByRole('group', { name: /display density/i }).getByRole('button', { name: /simple/i }).click()

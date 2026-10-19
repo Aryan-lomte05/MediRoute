@@ -431,7 +431,7 @@ export default function ParamedicPortal() {
       hospEl.innerHTML = `
         <div class="px-3 py-1.5 rounded-lg bg-[#7C3AED] border-2 border-[#A855F7] text-white font-mono font-bold text-xs shadow-[0_0_25px_rgba(168,85,247,0.9)] flex items-center gap-1.5">
           <span>🏥</span>
-          <span>${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}</span>
+          <span>${activeIncident?.allocatedHospital?.name || 'No hospital allocated'}</span>
         </div>
       `
       new mapboxgl.Marker({ element: hospEl, anchor: 'bottom' })
@@ -474,11 +474,15 @@ export default function ParamedicPortal() {
       const socket = getSocket()
       if (socket) {
         socket.emit('vitals_update', {
-          incidentId: activeIncident?._id || 'INC-LIVE',
+          incidentId: activeIncident?._id,
           vitals: patientVitals,
         })
       }
-      toast.success(`Live vitals telemetry synchronized with ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`)
+      toast.success(
+        activeIncident?.allocatedHospital?.name
+          ? `Vitals sent to ${activeIncident.allocatedHospital.name}`
+          : 'Vitals recorded. No hospital allocated yet.'
+      )
     } catch {
       toast.success('Live vitals synchronized with ER!')
     }
@@ -599,7 +603,11 @@ export default function ParamedicPortal() {
     if (socket && activeIncident?._id) {
       socket.emit('incident_status', { incidentId: activeIncident._id, status: 'COMPLETED' })
     }
-    toast.success(`Incident completed: Patient successfully handed to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Team'}!`)
+    toast.success(
+      activeIncident?.allocatedHospital?.name
+        ? `Handed over to ${activeIncident.allocatedHospital.name}`
+        : 'Incident completed'
+    )
   }
 
   // Vitals Increment / Decrement
@@ -834,7 +842,9 @@ export default function ParamedicPortal() {
                 socket.emit('trauma_alert', { incidentId: activeIncident?._id, vitals: patientVitals })
               }
               toast.error(
-                `🚨 High-Priority Trauma Alert Broadcast to ${activeIncident?.allocatedHospital?.name || 'Lilavati Trauma Bay'}!`
+                activeIncident?.allocatedHospital?.name
+                  ? `Trauma alert sent to ${activeIncident.allocatedHospital.name}`
+                  : 'No hospital allocated yet, alert not sent'
               )
             }}
             className="w-full h-full p-4 rounded-2xl bg-gradient-to-r from-[#8b1424] via-[#b5172e] to-[#8b1424] hover:from-[#b5172e] hover:to-[#c91a33] border border-red-500/50 shadow-[0_0_30px_rgba(255,45,74,0.35)] flex items-center justify-center gap-3 text-left transition-all group"
