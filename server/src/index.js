@@ -8,6 +8,7 @@ require('dotenv').config()
 
 const connectDB = require('./config/db')
 const initSockets = require('./sockets')
+const { startUnitSimulator } = require('./services/unitSimulator')
 
 // Routes
 const authRoutes = require('./routes/auth')
@@ -130,6 +131,17 @@ app.use((err, req, res, next) => {
 // Init Socket.io
 const io = initSockets(server)
 app.set('io', io)
+
+/**
+ * Drive ambulances that have no crew device signed in.
+ *
+ * Position is normally written by the crew through PATCH
+ * /ambulances/:id/location. Without that, an assigned unit never moved: the
+ * patient's tracking map showed a vehicle parked at its base, the ETA never
+ * counted down, and the job stayed DISPATCHED because nothing advanced it.
+ * A real device always wins — see RECENT_PING_MS in the service.
+ */
+startUnitSimulator(io)
 
 let currentPort = Number(process.env.PORT) || 5000
 

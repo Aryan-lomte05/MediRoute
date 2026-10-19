@@ -39,6 +39,7 @@ import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { PARAMEDIC_REAL_ROUTE } from '../lib/routing'
 import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import { useUiStore } from '../store/uiStore'
 import AiStatusBadge from '../components/AiStatusBadge'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -69,6 +70,17 @@ export default function ParamedicPortal() {
 
   // Cockpit Navigation Tab
   const [paramedicTab, setParamedicTab] = useState('nav') // 'nav' | 'vitals' | 'protocols' | 'voice'
+
+  // Density preference. In simple mode the secondary views are hidden and
+  // only the view a non-specialist needs is reachable.
+  const simple = useUiStore((st) => (st.modes['paramedic'] || 'pro') === 'simple')
+
+  // Switching to simple while on a now-hidden view would leave the body
+  // rendering a view with no way back to it, so the view is reset.
+  const SIMPLE_ALLOWED = ["nav", "vitals"]
+  useEffect(() => {
+    if (simple && !SIMPLE_ALLOWED.includes(paramedicTab)) setParamedicTab('nav')
+  }, [simple, paramedicTab])
 
   // Live Clock State
   const [currentTime, setCurrentTime] = useState('20:24')
@@ -688,29 +700,33 @@ export default function ParamedicPortal() {
             <span>Patient Telemetry & Vitals</span>
           </button>
 
-          <button
-            onClick={() => setParamedicTab('protocols')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
-              paramedicTab === 'protocols'
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span>📋</span>
-            <span>Clinical Protocols</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setParamedicTab('protocols')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                paramedicTab === 'protocols'
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span>📋</span>
+              <span>Clinical Protocols</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setParamedicTab('voice')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
-              paramedicTab === 'voice'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span>🎙️</span>
-            <span>Whisper Voice Log</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setParamedicTab('voice')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                paramedicTab === 'voice'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span>🎙️</span>
+              <span>Whisper Voice Log</span>
+            </button>
+          )}
         </div>
 
         <div className="hidden sm:flex items-center gap-2 text-[11px] text-emerald-400 font-mono">
@@ -718,6 +734,13 @@ export default function ParamedicPortal() {
           <span>Green Wave Signals Synchronized</span>
         </div>
       </nav>
+
+      {/* SIMPLE_BANNER: states the purpose of this screen in plain words. */}
+      {simple && (
+        <div className="px-5 py-2.5 bg-cyan-500/[0.07] border-b border-cyan-400/20 text-[13px] text-cyan-100/80 leading-relaxed">
+          This screen shows where you are going and the patient&apos;s condition. Switch to Full for the intervention checklist and dictation.
+        </div>
+      )}
 
       {/* ── TOP HUD CARDS ROW (3 Cards: Hospital / Route / Alert) ── */}
       <div className="p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 shrink-0">

@@ -853,7 +853,7 @@ export default function Landing() {
                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded">PUBLIC & AUTH</span>
               </div>
               <p className="text-xs text-white/60 mt-1">
-                Dispatch an emergency intake. Automatically triggers Groq LLaMA-3.3 clinical triage, vehicle assignment, and trauma hospital allocation.
+                Dispatch an emergency intake. Automatically triggers AI clinical triage, vehicle assignment, and trauma hospital allocation.
               </p>
             </div>
 

@@ -33,6 +33,7 @@ import { useAuthStore } from '../store/authStore'
 import { getSocket } from '../lib/socket'
 import api from '../lib/api'
 import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import { useUiStore } from '../store/uiStore'
 import { CITIZEN_REAL_ROUTE } from '../lib/routing'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -311,6 +312,17 @@ export default function PatientPortal() {
   const [activeIncident, setActiveIncident] = useState(null)
   const [selectedEmergency, setSelectedEmergency] = useState('cardiac')
   const [activeTab, setActiveTab] = useState('sos') // 'sos' | 'track' | 'firstaid' | 'profile'
+
+  // Density preference. In simple mode the secondary views are hidden and
+  // only the view a non-specialist needs is reachable.
+  const simple = useUiStore((st) => (st.modes['patient'] || 'simple') === 'simple')
+
+  // Switching to simple while on a now-hidden view would leave the body
+  // rendering a view with no way back to it, so the view is reset.
+  const SIMPLE_ALLOWED = ["sos", "track"]
+  useEffect(() => {
+    if (simple && !SIMPLE_ALLOWED.includes(activeTab)) setActiveTab('sos')
+  }, [simple, activeTab])
   const [currentAidStep, setCurrentAidStep] = useState(0)
   const [selectedTopic, setSelectedTopic] = useState('cpr')
 
@@ -1081,26 +1093,37 @@ export default function PatientPortal() {
             <span className="text-[10px]">Track</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('firstaid')}
-            className={`flex flex-col items-center gap-0.5 ${
-              activeTab === 'firstaid' ? 'text-cyan-400 font-bold' : 'text-white/40 hover:text-white'
-            }`}
-          >
-            <span className="text-base">🩺</span>
-            <span className="text-[10px]">First Aid</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setActiveTab('firstaid')}
+              className={`flex flex-col items-center gap-0.5 ${
+                activeTab === 'firstaid' ? 'text-cyan-400 font-bold' : 'text-white/40 hover:text-white'
+              }`}
+            >
+              <span className="text-base">🩺</span>
+              <span className="text-[10px]">First Aid</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`flex flex-col items-center gap-0.5 ${
-              activeTab === 'profile' ? 'text-white font-bold' : 'text-white/40 hover:text-white'
-            }`}
-          >
-            <span className="text-base">👤</span>
-            <span className="text-[10px]">Profile</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setActiveTab('profile')}
+              className={`flex flex-col items-center gap-0.5 ${
+                activeTab === 'profile' ? 'text-white font-bold' : 'text-white/40 hover:text-white'
+              }`}
+            >
+              <span className="text-base">👤</span>
+              <span className="text-[10px]">Profile</span>
+            </button>
+          )}
         </nav>
+
+      {/* SIMPLE_BANNER: states the purpose of this screen in plain words. */}
+      {simple && (
+        <div className="px-5 py-2.5 bg-cyan-500/[0.07] border-b border-cyan-400/20 text-[13px] text-cyan-100/80 leading-relaxed">
+          Use the red button to call for help, then follow the ambulance here. Switch to Full for first-aid guides and your medical profile.
+        </div>
+      )}
       </div>
 
       {/* ── INTERACTIVE PHONE CALL MODAL ── */}

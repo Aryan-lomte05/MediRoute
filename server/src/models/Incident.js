@@ -1,4 +1,7 @@
 const mongoose = require('mongoose')
+// Registered here so the pre-save hook can always resolve it, regardless of
+// which model a caller required first.
+require('./Counter')
 
 const incidentSchema = new mongoose.Schema(
   {
@@ -82,6 +85,17 @@ const incidentSchema = new mongoose.Schema(
       type: { type: String, enum: ['Point'], default: 'Point' },
       coordinates: { type: [Number], required: true }, // [lng, lat]
       address: String,
+
+      /**
+       * How the coordinates were obtained. The dispatcher runs a $nearSphere
+       * query on them, so precision matters: a GEOCODED landmark can be a few
+       * hundred metres out, and UNKNOWN means they should not be trusted for
+       * unit selection without the crew calling the reporter.
+       */
+      source: { type: String, enum: ['GPS', 'GEOCODED', 'MANUAL', 'UNKNOWN'], default: 'UNKNOWN' },
+
+      /** What the caller typed, kept verbatim next to the geocoder's reading. */
+      reportedAs: String,
     },
     assignedAmbulance: { type: mongoose.Schema.Types.ObjectId, ref: 'Ambulance' },
     allocatedHospital: { type: mongoose.Schema.Types.ObjectId, ref: 'Hospital' },
@@ -173,15 +187,45 @@ incidentSchema.index({ location: '2dsphere' })
 incidentSchema.index({ status: 1 })
 incidentSchema.index({ createdAt: -1 })
 
-// Generate incident number before save
+/**
+ * Assign a reference number before saving.
+ *
+ * This previously used countDocuments() + 1, which collided whenever two
+ * reports were created at the same moment (the unique index then rejected one
+ * with a 500, losing an emergency report) and permanently once any incident was
+ * deleted, since the count moved backwards onto numbers already issued.
+ *
+ * The counter is atomic and per-day, so numbers stay readable and never repeat.
+ */
 incidentSchema.pre('save', async function (next) {
-  if (!this.incidentNumber) {
-    const date = new Date()
-    const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
-    const count = await mongoose.model('Incident').countDocuments()
-    this.incidentNumber = `INC-${dateStr}-${String(count + 1).padStart(4, '0')}`
+  if (this.incidentNumber) return next()
+
+  try {
+    const Counter = mongoose.model('Counter')
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const seq = await Counter.next(`incident-${dateStr}`)
+    this.incidentNumber = `INC-${dateStr}-${String(seq).padStart(4, '0')}`
+    next()
+  } catch (err) {
+    next(err)
   }
-  next()
+})
+
+/**
+ * Last-resort uniqueness guard.
+ *
+ * If a number still collides — a counter reset, or rows restored from a backup
+ * that was taken ahead of the counter — a report must never be lost. Retry once
+ * with a distinct suffix rather than failing the request.
+ */
+incidentSchema.post('save', function (err, doc, next) {
+  if (err?.code === 11000 && err?.keyPattern?.incidentNumber) {
+    const suffix = Math.random().toString(36).slice(2, 5).toUpperCase()
+    doc.incidentNumber = `${doc.incidentNumber}-${suffix}`
+    doc.save().then(() => next()).catch(next)
+    return
+  }
+  next(err)
 })
 
 module.exports = mongoose.model('Incident', incidentSchema)

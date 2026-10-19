@@ -38,6 +38,7 @@ import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { PREFETCHED_TRAFFIC_ROUTES } from '../lib/routing'
 import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import { useUiStore } from '../store/uiStore'
 import AiStatusBadge from '../components/AiStatusBadge'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -119,6 +120,17 @@ export default function HospitalPortal() {
 
   // Navigation View Tab
   const [hospitalTab, setHospitalTab] = useState('queue') // 'queue' | 'inventory' | 'protocols' | 'mutualaid'
+
+  // Density preference. In simple mode the secondary views are hidden and
+  // only the view a non-specialist needs is reachable.
+  const simple = useUiStore((st) => (st.modes['hospital'] || 'pro') === 'simple')
+
+  // Switching to simple while on a now-hidden view would leave the body
+  // rendering a view with no way back to it, so the view is reset.
+  const SIMPLE_ALLOWED = ["queue"]
+  useEffect(() => {
+    if (simple && !SIMPLE_ALLOWED.includes(hospitalTab)) setHospitalTab('queue')
+  }, [simple, hospitalTab])
 
   // Live Clock
   const [currentTime, setCurrentTime] = useState(() =>
@@ -692,46 +704,59 @@ export default function HospitalPortal() {
             }`}
           >
             <span>🚨</span>
-            <span>Inbound Queue & 20-Bay Grid</span>
+            <span>Inbound Queue &amp; Bay Board</span>
           </button>
 
-          <button
-            onClick={() => setHospitalTab('inventory')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
-              hospitalTab === 'inventory'
-                ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span>🛏️</span>
-            <span>Resource & Blood Inventory</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setHospitalTab('inventory')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                hospitalTab === 'inventory'
+                  ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span>🛏️</span>
+              <span>Resource & Blood Inventory</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setHospitalTab('protocols')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
-              hospitalTab === 'protocols'
-                ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span>📋</span>
-            <span>Trauma Team Paging & Protocols</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setHospitalTab('protocols')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                hospitalTab === 'protocols'
+                  ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span>📋</span>
+              <span>Trauma Team Paging & Protocols</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setHospitalTab('mutualaid')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
-              hospitalTab === 'mutualaid'
-                ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span>🤝</span>
-            <span>Regional Mutual Aid</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setHospitalTab('mutualaid')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                hospitalTab === 'mutualaid'
+                  ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span>🤝</span>
+              <span>Regional Mutual Aid</span>
+            </button>
+          )}
         </div>
       </nav>
+
+      {/* SIMPLE_BANNER: states the purpose of this screen in plain words. */}
+      {simple && (
+        <div className="px-5 py-2.5 bg-cyan-500/[0.07] border-b border-cyan-400/20 text-[13px] text-cyan-100/80 leading-relaxed">
+          This screen shows who is being brought to you and how urgent they are. Switch to Full for bays, blood stock and the regional network.
+        </div>
+      )}
 
       {/* ── MAIN WORKSPACE BODY ── */}
       <div className="flex-1 p-5 space-y-4 overflow-y-auto">
@@ -757,7 +782,7 @@ export default function HospitalPortal() {
                 </div>
               </div>
 
-              {/* ER 20-Bays Grid */}
+              {/* ER bay board, sized per hospital */}
               <div className="xl:col-span-7 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-xl p-4 flex flex-col justify-between">
                 <div>
                   <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/[0.06]">

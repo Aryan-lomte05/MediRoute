@@ -465,6 +465,11 @@ router.post('/', optionalAuth, async (req, res, next) => {
         type: 'Point',
         coordinates: [Number(coords[0]), Number(coords[1])],
         address: location.address || 'Location pending reverse geocode',
+        // Precision matters: unit selection is a $nearSphere query on these
+        // coordinates, so the crew needs to know whether they came from a
+        // device fix or from geocoding what the caller typed.
+        source: ['GPS', 'GEOCODED', 'MANUAL'].includes(location.source) ? location.source : 'UNKNOWN',
+        reportedAs: location.reportedAs || null,
       },
       voiceTranscript: voiceTranscript || '',
       status: 'PENDING',

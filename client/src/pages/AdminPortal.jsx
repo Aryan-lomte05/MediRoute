@@ -40,6 +40,7 @@ import { getSocket } from '../lib/socket'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import { ModeToggle, GuideButton } from '../components/PortalGuide'
+import { useUiStore } from '../store/uiStore'
 import AiStatusBadge from '../components/AiStatusBadge'
 import toast from 'react-hot-toast'
 import { ADMIN_REAL_ROUTE } from '../lib/routing'
@@ -76,6 +77,17 @@ export default function AdminPortal() {
 
   // Primary Navigation Mode
   const [activeView, setActiveView] = useState('map') // 'map' | 'fleet' | 'hospitals' | 'analytics' | 'incidents'
+
+  // Density preference. In simple mode the secondary views are hidden and
+  // only the view a non-specialist needs is reachable.
+  const simple = useUiStore((st) => (st.modes['admin'] || 'pro') === 'simple')
+
+  // Switching to simple while on a now-hidden view would leave the body
+  // rendering a view with no way back to it, so the view is reset.
+  const SIMPLE_ALLOWED = ["map", "incidents"]
+  useEffect(() => {
+    if (simple && !SIMPLE_ALLOWED.includes(activeView)) setActiveView('map')
+  }, [simple, activeView])
 
   // State
   const [currentTime, setCurrentTime] = useState('')
@@ -864,41 +876,47 @@ export default function AdminPortal() {
             <span>3D Tactical GIS</span>
           </button>
 
-          <button
-            onClick={() => setActiveView('fleet')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
-              activeView === 'fleet'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-[0_0_12px_rgba(0,245,255,0.2)]'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span>🚑</span>
-            <span>Fleet Operations ({ambulances.length})</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setActiveView('fleet')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                activeView === 'fleet'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-[0_0_12px_rgba(0,245,255,0.2)]'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span>🚑</span>
+              <span>Fleet Operations ({ambulances.length})</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveView('hospitals')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
-              activeView === 'hospitals'
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.2)]'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span>🏥</span>
-            <span>Trauma & Bed Matrix ({hospitals.length})</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setActiveView('hospitals')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                activeView === 'hospitals'
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.2)]'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span>🏥</span>
+              <span>Trauma & Bed Matrix ({hospitals.length})</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveView('analytics')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
-              activeView === 'analytics'
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.2)]'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span>📊</span>
-            <span>AI Predictive Surge</span>
-          </button>
+          {!simple && (
+            <button
+              onClick={() => setActiveView('analytics')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                activeView === 'analytics'
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.2)]'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span>📊</span>
+              <span>AI Predictive Surge</span>
+            </button>
+          )}
 
           <button
             onClick={() => setActiveView('incidents')}
@@ -919,9 +937,17 @@ export default function AdminPortal() {
             MongoDB Synced
           </span>
           <span>·</span>
-          <span>Groq LLaMA-3.3 Active</span>
+          {/* Reported by /api/ai/health rather than asserted in static text. */}
+          <AiStatusBadge />
         </div>
       </nav>
+
+      {/* SIMPLE_BANNER: states the purpose of this screen in plain words. */}
+      {simple && (
+        <div className="px-5 py-2.5 bg-cyan-500/[0.07] border-b border-cyan-400/20 text-[13px] text-cyan-100/80 leading-relaxed">
+          This screen shows live emergencies across the city. Switch to Full for the fleet table, bed matrix and demand forecast.
+        </div>
+      )}
 
       {/* ── MAIN WORKSPACE CONTENT ── */}
       <div className="flex-1 flex overflow-hidden relative">
@@ -1737,7 +1763,7 @@ export default function AdminPortal() {
               <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-lg">
                 <div className="text-[10px] font-mono text-white/40 uppercase">Average Triage Latency</div>
                 <div className="text-2xl font-extrabold text-cyan-300 mt-1 font-mono">1.4s</div>
-                <div className="text-[10px] text-white/50 mt-0.5">Direct Groq LLaMA-3.3-70B inference</div>
+                <div className="text-[10px] text-white/50 mt-0.5">Direct Groq gpt-oss-120b inference</div>
               </div>
 
               <div className="p-4 rounded-2xl bg-[#090d16]/90 border border-white/[0.08] shadow-lg">

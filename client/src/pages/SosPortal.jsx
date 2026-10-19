@@ -149,6 +149,11 @@ export default function SosPortal() {
   const [submitting, setSubmitting] = useState(false)
   const [incident, setIncident] = useState(null)
   const [trackingToken, setTrackingToken] = useState(null)
+  // Whether the backend has answered at least once this session.
+  const [apiWarm, setApiWarm] = useState(false)
+  // Set when a send fails, so the caller is offered a retry rather than a
+  // dead end with only a toast that disappears.
+  const [sendError, setSendError] = useState(null)
 
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
@@ -156,6 +161,27 @@ export default function SosPortal() {
   const chunksRef = useRef([])
 
   const catalogue = branch === 'BYSTANDER' ? BYSTANDER_SITUATIONS : SELF_COMPLAINTS
+
+  /**
+   * Wake the API as soon as the page opens.
+   *
+   * The backend runs on a free tier that sleeps after inactivity, and a cold
+   * start can take 40-50s — longer than the request timeout. The first report
+   * of the day was therefore failing at the submit step, which is the worst
+   * possible moment. The caller spends 20-40s choosing a branch and answering
+   * questions, so a cheap ping on mount means the service is warm by the time
+   * they press send. Fire-and-forget: nothing depends on the result.
+   */
+  useEffect(() => {
+    const started = Date.now()
+    api
+      .get('/ai/health', { timeout: 90000 })
+      .then(() => setApiWarm(true))
+      .catch(() => setApiWarm(true)) // Even a failure means the dyno is now up.
+      .finally(() => {
+        if (Date.now() - started > 4000) console.info('[SOS] API was cold; it is warm now')
+      })
+  }, [])
 
   // ── Resume an in-flight report after a reload or a locked screen ──────────
   useEffect(() => {
@@ -282,11 +308,70 @@ export default function SosPortal() {
     return [picked?.text, freeText.trim()].filter(Boolean).join('. ')
   }
 
+  /**
+   * Turn a typed address or landmark into real coordinates.
+   *
+   * Biased towards Mumbai so a bare landmark like "Bandra station" resolves to
+   * the right city rather than a same-named place elsewhere.
+   *
+   * @returns {Promise<{coordinates: [number, number], address: string}|null>}
+   */
+  async function geocodeAddress(text) {
+    const token = import.meta.env.VITE_MAPBOX_TOKEN
+    if (!token || !text.trim()) return null
+
+    try {
+      const res = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(text.trim())}.json` +
+          `?access_token=${token}&proximity=72.8777,19.0760&country=IN&limit=1`
+      )
+      const json = await res.json()
+      const hit = json?.features?.[0]
+      if (!hit?.center) return null
+      return { coordinates: [hit.center[0], hit.center[1]], address: hit.place_name }
+    } catch {
+      return null
+    }
+  }
+
   async function submitReport() {
-    const effectiveCoords = coords
-    if (!effectiveCoords && !manualAddress.trim()) {
-      toast.error('We need a location to send help.')
-      return
+    let effectiveCoords = coords
+    let effectiveAddress = address
+    // 'GPS' when the device gave us a fix, 'GEOCODED' when we resolved typed
+    // text. Dispatch needs to know which, because a geocoded landmark can be a
+    // few hundred metres out.
+    let locationSource = coords ? 'GPS' : null
+
+    if (!effectiveCoords) {
+      if (!manualAddress.trim()) {
+        toast.error('We need a location to send help.')
+        return
+      }
+
+      /**
+       * Resolve the typed address to coordinates before sending.
+       *
+       * This previously submitted hardcoded Mumbai city-centre coordinates with
+       * the typed address carried only as text. Dispatch runs a $nearSphere
+       * query on those coordinates, so it would have assigned the ambulance
+       * nearest Parel rather than the actual emergency, and the ETA shown to
+       * the caller would have been measured from the wrong point.
+       */
+      setSubmitting(true)
+      const resolved = await geocodeAddress(manualAddress)
+      setSubmitting(false)
+
+      if (!resolved) {
+        toast.error(
+          `We could not find "${manualAddress.trim()}". Add a landmark or area, or call ${EMERGENCY_NUMBER}.`,
+          { duration: 7000 }
+        )
+        return
+      }
+
+      effectiveCoords = resolved.coordinates
+      effectiveAddress = resolved.address
+      locationSource = 'GEOCODED'
     }
 
     setSubmitting(true)
@@ -296,10 +381,12 @@ export default function SosPortal() {
         chiefComplaint: buildComplaint() || 'Emergency assistance requested',
         reporterContact: callerPhone.trim() ? { phone: callerPhone.trim() } : undefined,
         location: {
-          // Mumbai city centre stands in only when the browser gave us nothing
-          // and the person typed an address instead; dispatch reads the text.
-          coordinates: effectiveCoords || [72.8777, 19.076],
-          address: address || manualAddress.trim() || 'Address given by caller',
+          coordinates: effectiveCoords,
+          address: effectiveAddress || manualAddress.trim(),
+          source: locationSource,
+          // What the caller actually typed, kept verbatim alongside the
+          // geocoder's interpretation so the crew can tell them apart.
+          reportedAs: coords ? null : manualAddress.trim() || null,
         },
         sceneInfo: {
           victimCount,
@@ -310,8 +397,16 @@ export default function SosPortal() {
         },
       }
 
-      const { data } = await api.post('/incidents', payload)
+      /**
+       * A generous timeout on purpose. The default 30s is shorter than a cold
+       * start on the hosting free tier, so an emergency report could time out
+       * and be reported to the caller as a failure while the request was still
+       * in flight. Waiting is always better than telling someone help was not
+       * requested when it may have been.
+       */
+      const { data } = await api.post('/incidents', payload, { timeout: 120000 })
 
+      setSendError(null)
       setIncident(data.incident)
       setTrackingToken(data.trackingToken)
       localStorage.setItem(
@@ -321,8 +416,18 @@ export default function SosPortal() {
       setStep('active')
       toast.success('Help has been requested')
     } catch (err) {
-      const msg = err.response?.data?.message || 'Could not send the report.'
-      toast.error(`${msg} Please call ${EMERGENCY_NUMBER}.`)
+      // Distinguish a refusal from never reaching the server. A timeout or a
+      // network drop may still have created the report, so the wording must not
+      // state that nothing was sent.
+      const reachedServer = Boolean(err.response)
+      const serverMessage = err.response?.data?.message
+
+      const message = reachedServer
+        ? serverMessage || 'The service refused the report.'
+        : 'We could not reach the service. Your report may not have been sent.'
+
+      setSendError(message)
+      toast.error(`${message} If this is urgent, call ${EMERGENCY_NUMBER} now.`, { duration: 9000 })
     } finally {
       setSubmitting(false)
     }
@@ -451,6 +556,8 @@ export default function SosPortal() {
                 callerPhone={callerPhone}
                 setCallerPhone={setCallerPhone}
                 submitting={submitting}
+                apiWarm={apiWarm}
+                sendError={sendError}
                 onBack={() => setStep('describe')}
                 onSend={submitReport}
               />
@@ -795,6 +902,8 @@ function DescribeStep({
 function ConfirmStep({
   branch,
   geoState,
+  apiWarm,
+  sendError,
   address,
   coords,
   manualAddress,
@@ -879,11 +988,44 @@ function ConfirmStep({
 
       <div className="mt-8">
         <PrimaryButton disabled={!canSend} loading={submitting} onClick={onSend}>
-          Send for help now
+          {sendError ? 'Try sending again' : 'Send for help now'}
         </PrimaryButton>
+
         {!canSend && (
           <p className="text-sm text-white/40 mt-2 text-center">
             We need a location before we can send a crew.
+          </p>
+        )}
+
+        {/*
+          A failed send stays on screen with a retry. A toast disappears, and
+          someone in an emergency should never be left unsure whether their
+          report went through.
+        */}
+        {sendError && (
+          <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/[0.08] p-4">
+            <p className="text-sm font-semibold text-red-200">{sendError}</p>
+            <p className="text-sm text-white/65 mt-1.5 leading-relaxed">
+              Press the button above to try again. If help is needed now, do not wait — call{' '}
+              {EMERGENCY_NUMBER}.
+            </p>
+            <a
+              href={`tel:${EMERGENCY_NUMBER}`}
+              className="mt-3 block w-full rounded-xl bg-red-600 hover:bg-red-500 text-center font-bold py-3 transition-colors"
+            >
+              Call {EMERGENCY_NUMBER}
+            </a>
+          </div>
+        )}
+
+        {/*
+          The backend sleeps on its free tier and can take most of a minute to
+          wake. Saying so beats a spinner that looks stuck.
+        */}
+        {submitting && !apiWarm && (
+          <p className="text-sm text-white/50 mt-3 text-center leading-relaxed">
+            Waking the dispatch service. This can take up to a minute the first
+            time — please stay on this page.
           </p>
         )}
       </div>

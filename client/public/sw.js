@@ -14,14 +14,24 @@
  * ==============================================================================
  */
 
-const CACHE_NAME = 'mediroute-cache-v2'
+const CACHE_NAME = 'mediroute-cache-v3'
 
 /**
  * The emergency page is precached deliberately: a citizen may open the app in a
  * basement, a lift or a dead spot, and the reporting screen has to render even
  * when the request for it fails.
  */
-const ASSETS_TO_CACHE = ['/', '/index.html', '/sos', '/manifest.json', '/favicon.svg', '/icons.svg']
+const ASSETS_TO_CACHE = [
+  '/',
+  '/index.html',
+  '/sos',
+  '/manifest.json',
+  '/favicon.svg',
+  '/icons.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
