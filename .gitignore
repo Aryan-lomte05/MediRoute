@@ -1,5 +1,8 @@
 node_modules/
 .env
+# Any env variant, so a .env.production or .env.local cannot be committed.
+.env*
+!.env.example
 dist/
 .DS_Store
 *.log

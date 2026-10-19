@@ -152,7 +152,19 @@ function advanceAlong(line, index, position, metres) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /** Statuses the simulator is responsible for driving forward. */
-const DRIVABLE = ['DISPATCHED', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL']
+const DRIVABLE = [
+  'DISPATCHED',
+  'EN_ROUTE_TO_PATIENT',
+  'AT_PATIENT',
+  'EN_ROUTE_TO_HOSPITAL',
+  // Included so the handover can finish and the unit be released. Without it
+  // the lifecycle stopped on arrival and the vehicle never came back into
+  // service, quietly shrinking the dispatchable fleet.
+  'ARRIVED_AT_HOSPITAL',
+]
+
+/** How long the crew spends handing the patient over before going clear. */
+const HANDOVER_MS = parseInt(process.env.SIM_HANDOVER_MS || '45000', 10)
 
 /**
  * Advance one incident by one tick.
@@ -166,11 +178,46 @@ async function stepIncident(incident, io) {
   const lastPing = ambulance.lastPing ? new Date(ambulance.lastPing).getTime() : 0
   if (!ambulance.isSimulated && Date.now() - lastPing < RECENT_PING_MS) return false
 
+  // The unit must still be assigned to THIS incident. A released or
+  // reassigned vehicle is left alone.
+  if (String(ambulance.currentIncident) !== String(incident._id)) {
+    console.warn(
+      `[sim] ${incident.incidentNumber} no longer holds ${ambulance.vehicleNumber}, skipping`
+    )
+    return false
+  }
+
   const unitAt = ambulance.currentLocation?.coordinates
   if (!Array.isArray(unitAt) || unitAt.length !== 2) return false
 
   const status = incident.status
   const metresPerTick = (SIM_KMH * 1000 / 3600) * (TICK_MS / 1000)
+
+  // ── Handover finished: close the job and return the unit to service ─────
+  if (status === 'ARRIVED_AT_HOSPITAL') {
+    const since = incident.timestamps?.arrivedAtHospital
+      ? new Date(incident.timestamps.arrivedAtHospital).getTime()
+      : 0
+    if (Date.now() - since < HANDOVER_MS) return false
+
+    await Promise.all([
+      Incident.findByIdAndUpdate(incident._id, {
+        status: 'COMPLETED',
+        'timestamps.completed': new Date(),
+      }),
+      Ambulance.findByIdAndUpdate(ambulance._id, {
+        status: 'AVAILABLE',
+        currentIncident: null,
+        isSimulated: false,
+      }),
+    ])
+
+    emit(io, incident, 'incident_status', { status: 'COMPLETED' })
+    console.log(
+      `[sim] ${incident.incidentNumber} complete, ${ambulance.vehicleNumber} back in service`
+    )
+    return true
+  }
 
   // ── Waiting at the scene ─────────────────────────────────────────────────
   if (status === 'AT_PATIENT') {
@@ -329,10 +376,35 @@ function emit(io, incident, event, extra) {
 // LOOP
 // ──────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Return any vehicle stuck in a driving state while holding no incident.
+ *
+ * Such a unit is invisible to dispatch, which only considers AVAILABLE, and
+ * nothing else would ever free it. This is a safety net rather than a fix:
+ * the ownership check in stepIncident is what stops it happening.
+ */
+async function releaseStrandedUnits() {
+  const stranded = await Ambulance.find({
+    status: { $in: ['DISPATCHED', 'EN_ROUTE_TO_PATIENT', 'AT_PATIENT', 'EN_ROUTE_TO_HOSPITAL', 'AT_HOSPITAL'] },
+    currentIncident: null,
+  })
+
+  for (const a of stranded) {
+    await Ambulance.findByIdAndUpdate(a._id, {
+      status: 'AVAILABLE',
+      isSimulated: false,
+    })
+    console.warn(`[sim] Released stranded unit ${a.vehicleNumber} (was ${a.status} with no job)`)
+  }
+
+  return stranded.length
+}
+
 async function tick(io) {
   if (running) return // never overlap ticks
   running = true
   try {
+    await releaseStrandedUnits()
     const jobs = await Incident.find({
       status: { $in: DRIVABLE },
       assignedAmbulance: { $ne: null },
