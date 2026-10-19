@@ -583,6 +583,102 @@ async function forecastSurge(IncidentModel, hoursAhead = 12) {
   }
 }
 
+
+/**
+ * Drive one turn of a spoken emergency call.
+ *
+ * Does three jobs in a single model call, because a caller is waiting on the
+ * line and a second round trip is a second of silence: work out which language
+ * they are actually speaking, decide whether enough is known to send an
+ * ambulance, and compose the spoken reply in that same language.
+ *
+ * Replies are kept to one or two short sentences. This is read aloud by a
+ * text-to-speech voice to someone in distress, so a paragraph is unusable.
+ *
+ * @param {object} opts
+ * @param {string} opts.transcript        Everything the caller has said so far.
+ * @param {number} opts.turn              Which exchange this is, from 0.
+ * @param {string} opts.assumedLanguage   Best guess so far, as a fallback.
+ * @returns {Promise<{language: string, reply: string, readyToDispatch: boolean,
+ *                    complaint: string, location: string, closing: string}>}
+ */
+async function converseEmergencyCall({ transcript, turn = 0, assumedLanguage = 'en' }) {
+  const system =
+    'You are an emergency call taker for an ambulance service in Mumbai, India. ' +
+    'You reply with a single JSON object and nothing else. ' +
+    'Your words are read aloud by a speech synthesiser to someone in distress, so every ' +
+    'spoken line must be at most two short sentences, calm, and free of jargon.'
+
+  const user = `An emergency call is in progress. This is exchange ${turn + 1}.
+
+What the caller has said so far: "${transcript}"
+
+Decide the following and return exactly this JSON:
+{
+  "language": "<one of: en, hi, mr, gu, ta, bn - the language the CALLER is speaking>",
+  "reply": "<what to say next, IN THAT SAME LANGUAGE, at most two short sentences>",
+  "readyToDispatch": <true when you know roughly what happened AND roughly where, else false>,
+  "complaint": "<a short clinical description in ENGLISH for the dispatch record>",
+  "location": "<any place, landmark or address the caller mentioned, in ENGLISH, else empty>",
+  "closing": "<said only when readyToDispatch is true: tell them help is coming and to stay on the line, IN THEIR LANGUAGE>"
+}
+
+Rules:
+- Ask for the single most important missing thing, never a list of questions.
+- Location matters most. If you do not have one, ask for a landmark.
+- Set readyToDispatch true as soon as you have a rough what and a rough where.
+  An ambulance moving towards an approximate address beats a perfect address
+  collected too late.
+- Never ask for a blood group, a medical history or anything the caller is
+  unlikely to know.
+- "complaint" and "location" are for the record and are always in English, even
+  when the caller is speaking another language.`
+
+  const result = await callLLM({
+    system,
+    user,
+    validate: (p) => p && typeof p.reply === 'string' && p.reply.length > 0,
+  })
+
+  if (result) {
+    const d = result.data
+    const allowed = ['en', 'hi', 'mr', 'gu', 'ta', 'bn']
+    return {
+      language: allowed.includes(d.language) ? d.language : assumedLanguage,
+      reply: cleanText(d.reply).slice(0, 300),
+      readyToDispatch: Boolean(d.readyToDispatch),
+      complaint: cleanText(d.complaint || transcript).slice(0, 400),
+      location: cleanText(d.location || '').slice(0, 200),
+      closing: cleanText(d.closing || '').slice(0, 300),
+      engine: result.engine,
+    }
+  }
+
+  /*
+   * Model unreachable. An emergency line cannot stall, so dispatch on what was
+   * heard and say so in the language we last believed the caller was using.
+   */
+  const FALLBACK_REPLY = {
+    en: 'Help is being arranged. Stay on the line.',
+    hi: 'मदद भेजी जा रही है। लाइन पर बने रहें।',
+    mr: 'मदत पाठवली जात आहे. लाइनवर रहा.',
+    gu: 'મદદ મોકલાઈ રહી છે. લાઇન પર રહો.',
+    ta: 'உதவி ஏற்பாடு செய்யப்படுகிறது. இணைப்பில் இருங்கள்.',
+    bn: 'সাহায্য পাঠানো হচ্ছে। লাইনে থাকুন।',
+  }
+
+  console.warn('[AI] Voice agent unavailable, dispatching on what was heard')
+  return {
+    language: assumedLanguage,
+    reply: FALLBACK_REPLY[assumedLanguage] || FALLBACK_REPLY.en,
+    readyToDispatch: true,
+    complaint: cleanText(transcript || 'Emergency call, details unclear'),
+    location: '',
+    closing: '',
+    engine: 'rules',
+  }
+}
+
 /** Live provider reachability, for the AI status badge in the UI. */
 async function getAIHealth() {
   const configured = {
@@ -618,6 +714,7 @@ async function getAIHealth() {
 
 module.exports = {
   triageIncident,
+  converseEmergencyCall,
   rankHospitals,
   transcribeAudio,
   forecastSurge,

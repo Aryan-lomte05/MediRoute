@@ -70,8 +70,20 @@ class TwilioService {
   /**
    * Send WhatsApp emergency summary
    */
-  async sendWhatsAppAlert({ toPhone, messageText }) {
-    if (!toPhone) return null
+  /**
+   * Send a WhatsApp message.
+   *
+   * Reports delivery honestly, as the SMS path does. This previously caught a
+   * live failure and fell through to return success: true with a fabricated
+   * SID, so a rejected number or an unapproved template looked identical to a
+   * delivered message.
+   */
+  async sendWhatsAppAlert({ toPhone, messageText, context = 'WhatsApp alert' }) {
+    if (!toPhone) {
+      console.warn(`[TwilioService] Skipped ${context}: no recipient.`)
+      return { success: false, delivered: false, reason: 'No phone number' }
+    }
+
     const formattedTo = toPhone.startsWith('whatsapp:') ? toPhone : `whatsapp:${toPhone}`
 
     if (this.client) {
@@ -80,15 +92,31 @@ class TwilioService {
           from: twilioConfig.whatsappFrom,
           to: formattedTo,
           body: messageText,
+          statusCallback: twilioConfig.statusCallbackUrl,
         })
-        return { success: true, sid: message.sid, status: message.status }
+        console.log(`[TwilioService] Sent ${context} (SID: ${message.sid})`)
+        return { success: true, delivered: true, sid: message.sid, status: message.status }
       } catch (err) {
-        console.error('[TwilioService] WhatsApp dispatch error:', err.message)
+        console.error(`[TwilioService] WhatsApp send failed for ${context}:`, err.message)
+        return {
+          success: false,
+          delivered: false,
+          simulated: false,
+          reason: err.message,
+          code: err.code || null,
+        }
       }
     }
 
-    console.log(`[TwilioService Simulation] WhatsApp sent to ${formattedTo}: "${messageText.substring(0, 60)}..."`)
-    return { success: true, simulated: true, sid: `SIM_WA_${Date.now()}` }
+    console.log(`[TwilioService] NOT SENT (no credentials) - ${context} to ${formattedTo}`)
+    console.log(`  Would have sent: "${messageText}"`)
+    return {
+      success: false,
+      delivered: false,
+      simulated: true,
+      reason: 'Twilio is not configured, so no WhatsApp message was sent',
+      preview: messageText,
+    }
   }
 
   /**

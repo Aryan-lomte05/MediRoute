@@ -38,6 +38,7 @@ const twilio = require('twilio')
 const twilioConfig = require('../config/twilio')
 const twilioService = require('../services/twilioService')
 const Incident = require('../models/Incident')
+const aiService = require('../services/aiService')
 const { runDispatchPipeline } = require('./incidents')
 
 const router = express.Router()
@@ -343,6 +344,200 @@ router.post('/incoming-sms', verifyTwilioSignature, async (req, res) => {
     return res.type('text/xml').send(
       twiml(`
       <Message>MediRoute could not log your emergency automatically. Please call ${twilioConfig.emergencyDispatchNumber} immediately.</Message>`)
+    )
+  }
+})
+
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/telephony/whatsapp - inbound WhatsApp SOS
+// ──────────────────────────────────────────────────────────────────────────────
+// Twilio delivers WhatsApp through the same message webhook shape as SMS, with
+// a "whatsapp:" prefix on the addresses. It gets its own route so the reply
+// goes back over WhatsApp rather than as an SMS the sender never asked for.
+router.post('/whatsapp', verifyTwilioSignature, async (req, res) => {
+  const from = req.body.From || ''
+  const body = (req.body.Body || '').trim()
+  const io = req.app.get('io')
+
+  console.log(`[Telephony WhatsApp] From ${from}: "${body.slice(0, 80)}"`)
+
+  try {
+    const incident = await createTelephonyIncident({
+      // Store the bare number; the whatsapp: prefix is a transport detail.
+      phone: from.replace(/^whatsapp:/, ''),
+      complaint: body || 'Emergency reported over WhatsApp, no detail given',
+      locationText: body,
+      channel: 'whatsapp',
+      io,
+    })
+
+    const base = process.env.CLIENT_URL || 'https://mediroute-five.vercel.app'
+
+    return res.type('text/xml').send(
+      twiml(
+        `<Message>MediRoute: emergency ${incident.incidentNumber} received. Help is being arranged. Track it here: ${base}/sos . If this is life-threatening, call ${twilioConfig.emergencyDispatchNumber} now.</Message>`
+      )
+    )
+  } catch (err) {
+    console.error('[Telephony WhatsApp] Failed to create incident:', err.message)
+    return res.type('text/xml').send(
+      twiml(
+        `<Message>MediRoute could not log your emergency automatically. Please call ${twilioConfig.emergencyDispatchNumber} immediately.</Message>`
+      )
+    )
+  }
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/telephony/voice-ai - conversational, multilingual voice intake
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Languages the voice agent understands and answers in.
+ *
+ * `stt` is what Twilio listens for, `tts` picks the Polly voice. A caller is
+ * answered in the language they used, because someone in distress should not
+ * have to switch languages to be understood.
+ */
+const VOICE_LANGS = {
+  en: { stt: 'en-IN', tts: 'Polly.Aditi', label: 'English' },
+  hi: { stt: 'hi-IN', tts: 'Polly.Aditi', label: 'Hindi' },
+  mr: { stt: 'mr-IN', tts: 'Polly.Aditi', label: 'Marathi' },
+  gu: { stt: 'gu-IN', tts: 'Polly.Aditi', label: 'Gujarati' },
+  ta: { stt: 'ta-IN', tts: 'Polly.Raveena', label: 'Tamil' },
+  bn: { stt: 'bn-IN', tts: 'Polly.Raveena', label: 'Bengali' },
+}
+
+const DEFAULT_VOICE_LANG = 'en'
+
+/** XML-escape anything spoken, so a transcript cannot break the TwiML. */
+const sayEscape = (text) =>
+  String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/**
+ * The AI voice agent.
+ *
+ * Twilio transcribes the caller, the model decides what to say back and
+ * whether enough is known to dispatch, and the reply is spoken in the
+ * caller's own language. The conversation state rides in the query string
+ * because Twilio webhooks are stateless between legs.
+ *
+ * Deliberately bounded: after a few turns it dispatches on what it has and
+ * connects a human, rather than interviewing someone who needs an ambulance.
+ */
+router.post('/voice-ai', verifyTwilioSignature, async (req, res) => {
+  const caller = req.body.From || 'Unknown'
+  const speech = (req.body.SpeechResult || '').trim()
+  const io = req.app.get('io')
+
+  const lang = VOICE_LANGS[req.query.lang] ? req.query.lang : DEFAULT_VOICE_LANG
+  const turn = parseInt(req.query.turn, 10) || 0
+  // Express has already decoded the query string; decoding again would
+  // corrupt any text containing a literal percent sign.
+  const sofar = req.query.sofar || ''
+
+  const voice = VOICE_LANGS[lang]
+  const nextUrl = (params) =>
+    // The result goes into an XML attribute, where a bare & is invalid markup.
+    `/api/telephony/voice-ai?${new URLSearchParams(params).toString()}`.replace(/&/g, '&amp;')
+
+  // ── Opening leg: offer a language, then listen ──────────────────────────
+  if (turn === 0 && !speech) {
+    return res.type('text/xml').send(
+      twiml(`
+    <Gather input="speech dtmf" numDigits="1" language="en-IN" speechTimeout="auto"
+            action="${nextUrl({ lang: 'en', turn: 1 })}" method="POST">
+      <Say voice="Polly.Aditi" language="en-IN">MediRoute Emergency. Tell me what has happened.</Say>
+      <Say voice="Polly.Aditi" language="hi-IN">आप हिंदी में भी बोल सकते हैं। बताइए क्या हुआ है।</Say>
+      <Say voice="Polly.Aditi" language="mr-IN">तुम्ही मराठीत सुद्धा बोलू शकता.</Say>
+    </Gather>
+    <Say voice="Polly.Aditi" language="en-IN">I did not hear anything. Connecting you to an operator.</Say>
+    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    )
+  }
+
+  // Nothing heard on a later leg: do not loop forever on a silent line.
+  if (!speech) {
+    return res.type('text/xml').send(
+      twiml(`
+    <Say voice="${voice.tts}" language="${voice.stt}">Connecting you to an operator now.</Say>
+    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    )
+  }
+
+  const transcript = [sofar, speech].filter(Boolean).join(' ')
+
+  try {
+    /*
+     * One model call does three jobs: detect the language actually spoken,
+     * decide whether enough is known to send an ambulance, and compose the
+     * spoken reply in that same language.
+     */
+    const decision = await aiService.converseEmergencyCall({
+      transcript,
+      turn,
+      assumedLanguage: lang,
+    })
+
+    const replyLang = VOICE_LANGS[decision.language] ? decision.language : lang
+    const replyVoice = VOICE_LANGS[replyLang]
+
+    // Enough information, or the conversation has run long enough.
+    if (decision.readyToDispatch || turn >= 3) {
+      const incident = await createTelephonyIncident({
+        phone: caller,
+        complaint: decision.complaint || transcript,
+        locationText: decision.location || '',
+        channel: 'call',
+        io,
+      })
+
+      console.log(
+        `[Telephony AI] ${incident.incidentNumber} from a ${replyVoice.label} call after ${turn + 1} turns`
+      )
+
+      return res.type('text/xml').send(
+        twiml(`
+    <Say voice="${replyVoice.tts}" language="${replyVoice.stt}">${sayEscape(decision.reply)}</Say>
+    <Say voice="${replyVoice.tts}" language="${replyVoice.stt}">${sayEscape(decision.closing || '')}</Say>
+    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+      )
+    }
+
+    // Keep listening: ask the one thing still missing.
+    return res.type('text/xml').send(
+      twiml(`
+    <Gather input="speech" language="${replyVoice.stt}" speechTimeout="auto"
+            action="${nextUrl({ lang: replyLang, turn: turn + 1, sofar: transcript })}" method="POST">
+      <Say voice="${replyVoice.tts}" language="${replyVoice.stt}">${sayEscape(decision.reply)}</Say>
+    </Gather>
+    <Say voice="${replyVoice.tts}" language="${replyVoice.stt}">Connecting you to an operator.</Say>
+    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
+    )
+  } catch (err) {
+    console.error('[Telephony AI] Voice agent failed:', err.message)
+
+    /*
+     * The model is not allowed to be a single point of failure on an emergency
+     * line. Dispatch on what was heard and hand the caller to a human.
+     */
+    try {
+      await createTelephonyIncident({
+        phone: caller,
+        complaint: transcript || 'Emergency call, details unclear',
+        locationText: '',
+        channel: 'call',
+        io,
+      })
+    } catch (inner) {
+      console.error('[Telephony AI] Fallback incident also failed:', inner.message)
+    }
+
+    return res.type('text/xml').send(
+      twiml(`
+    <Say voice="${voice.tts}" language="${voice.stt}">Your emergency has been logged. Connecting you to an operator now.</Say>
+    <Dial timeout="30">${twilioConfig.emergencyDispatchNumber}</Dial>`)
     )
   }
 })
